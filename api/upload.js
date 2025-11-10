@@ -1,66 +1,117 @@
-def main(request):
-    # ... (all your existing code above stays the same)
-    
-    # Sort by value for easier debugging
-    players_sorted = sorted(players, key=lambda x: x["value"])
+const https = require('https');
 
-    # ============= ADD THIS SECTION =============
-    # Chain to SIGNALS agent
-    import requests
+function makeRequest(url, options, postData) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      method: options.method || 'POST',
+      headers: options.headers || {}
+    };
     
-    SWARMNODE_BASE = os.getenv("SWARMNODE_BASE", "https://api.swarmnode.ai").rstrip("/")
-    SWARMNODE_KEY = os.getenv("SWARMNODE_API_KEY", "").strip()
-    NEXT_AGENT = os.getenv("NEXT_AGENT_ID_SIGNALS", "").strip()
+    const req = https.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        resolve({ statusCode: res.statusCode, body: data });
+      });
+    });
     
-    next_payload = {
-        "players": players_sorted,
-        "metadata": metadata
-    }
-    
-    chain_result = {"ok": False, "error": "Not attempted"}
-    
-    if NEXT_AGENT and SWARMNODE_KEY:
-        try:
-            url = f"{SWARMNODE_BASE}/v1/agent-executor-jobs/create/"
-            headers = {
-                "Authorization": f"Bearer {SWARMNODE_KEY}",
-                "Content-Type": "application/json"
-            }
-            body = {"agent_id": NEXT_AGENT, "payload": next_payload}
-            
-            response = requests.post(url, headers=headers, json=body, timeout=30)
-            
-            if response.status_code in (200, 201):
-                chain_result = {"ok": True, "job_id": response.json().get("job_id")}
-            else:
-                chain_result = {"ok": False, "status": response.status_code}
-        except Exception as e:
-            chain_result = {"ok": False, "error": str(e)}
-    else:
-        chain_result = {"ok": False, "error": "Missing NEXT_AGENT_ID_SIGNALS or SWARMNODE_API_KEY"}
-    
-    print(f"✅ INGEST: Chaining to SIGNALS - {chain_result}")
-    # ============= END NEW SECTION =============
+    req.on('error', reject);
+    if (postData) req.write(postData);
+    req.end();
+  });
+}
 
-    return {
-        "ok": True,
-        "players": players_sorted,
-        "metadata": metadata,
-        "validation": validation,
-        "summary": {
-            "total_players": len(players),
-            "avg_salary": validation.get("avg_salary"),
-            "positions": validation.get("positions_available"),
-            "top_values": [
-                {
-                    "name": p["name"],
-                    "salary": p["salary"],
-                    "fppg": p["fppg"],
-                    "value": p["value"]
-                }
-                for p in players_sorted[:5]
-            ]
-        },
-        "chained_to": "SIGNALS",
-        "chain_result": chain_result
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  try {
+    const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
+    const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
+    const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID;
+
+    console.log('🔍 Starting upload - Agent ID:', INGEST_AGENT_ID);
+
+    if (!SWARMNODE_KEY || !INGEST_AGENT_ID) {
+      return res.status(500).json({ 
+        error: 'Missing configuration',
+        details: 'Add SWARMNODE_API_KEY and INGEST_AGENT_ID in Vercel'
+      });
     }
+
+    let csvText = '';
+    if (req.body && typeof req.body === 'object') {
+      csvText = req.body.csv || req.body.csvText || '';
+    }
+
+    if (!csvText || csvText.length < 50) {
+      return res.status(400).json({ 
+        error: 'Invalid CSV',
+        details: 'CSV is empty or too short'
+      });
+    }
+
+    console.log(`📊 CSV received: ${csvText.length} chars`);
+
+    // Call INGEST agent
+    const payload = {
+      csv_text: csvText,
+      slate_date: new Date().toISOString().split('T')[0]
+    };
+
+    const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
+    const postData = JSON.stringify({
+      agent_id: INGEST_AGENT_ID,
+      payload: payload
+    });
+
+    console.log('🚀 Calling INGEST agent...');
+
+    const response = await makeRequest(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SWARMNODE_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, postData);
+
+    console.log(`✅ SwarmNode responded: ${response.statusCode}`);
+
+    let result;
+    try {
+      result = JSON.parse(response.body);
+    } catch {
+      result = { raw: response.body };
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return res.status(200).json({
+        success: true,
+        message: '✅ Pipeline started! INGEST → SIGNALS → PROJECTIONS → OPTIMIZER',
+        job_id: result.job_id || result.id,
+        agent_started: 'INGEST',
+        swarmnode_link: `https://app.swarmnode.ai`
+      });
+    } else {
+      return res.status(response.statusCode || 500).json({
+        error: 'SwarmNode API error',
+        details: result
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    return res.status(500).json({ 
+      error: 'Server error',
+      message: error.message
+    });
+  }
+};
