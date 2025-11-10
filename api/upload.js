@@ -1,3 +1,6 @@
+cd ~/dfs-optimizer
+
+cat > api/upload.js << 'ENDOFFILE'
 const https = require('https');
 
 function makeRequest(url, options, postData) {
@@ -37,10 +40,19 @@ module.exports = async (req, res) => {
     const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
     const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID;
 
+    console.log('Environment check:', {
+      hasKey: !!SWARMNODE_KEY,
+      hasIngestId: !!INGEST_AGENT_ID
+    });
+
     if (!SWARMNODE_KEY || !INGEST_AGENT_ID) {
       return res.status(500).json({ 
         error: 'Missing configuration',
-        details: 'Add SWARMNODE_API_KEY and INGEST_AGENT_ID in Vercel environment variables'
+        details: 'Add SWARMNODE_API_KEY and INGEST_AGENT_ID in Vercel',
+        missing: {
+          api_key: !SWARMNODE_KEY,
+          ingest_id: !INGEST_AGENT_ID
+        }
       });
     }
 
@@ -52,10 +64,14 @@ module.exports = async (req, res) => {
     if (!csvText || csvText.length < 50) {
       return res.status(400).json({ 
         error: 'Invalid CSV',
-        details: 'CSV is empty or too short'
+        details: 'CSV is empty or too short',
+        received_length: csvText.length
       });
     }
 
+    console.log(`CSV received: ${csvText.length} chars`);
+
+    // Call INGEST agent (not SIGNALS!)
     const payload = {
       csv_text: csvText,
       slate_date: new Date().toISOString().split('T')[0]
@@ -67,6 +83,8 @@ module.exports = async (req, res) => {
       payload: payload
     });
 
+    console.log('Calling INGEST agent:', INGEST_AGENT_ID);
+
     const response = await makeRequest(url, {
       method: 'POST',
       headers: {
@@ -75,6 +93,8 @@ module.exports = async (req, res) => {
         'Content-Length': Buffer.byteLength(postData)
       }
     }, postData);
+
+    console.log('SwarmNode response:', response.statusCode);
 
     let result;
     try {
@@ -86,8 +106,10 @@ module.exports = async (req, res) => {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return res.status(200).json({
         success: true,
-        message: 'CSV processed! Check SwarmNode for results.',
+        message: 'CSV uploaded! INGEST → SIGNALS → PROJECTIONS → OPTIMIZER pipeline started.',
         job_id: result.job_id || result.id,
+        agent_started: 'INGEST',
+        expected_chain: 'INGEST → SIGNALS → PROJECTIONS → OPTIMIZER',
         swarmnode_link: `https://app.swarmnode.ai`
       });
     } else {
@@ -98,9 +120,11 @@ module.exports = async (req, res) => {
     }
 
   } catch (error) {
+    console.error('Error:', error);
     return res.status(500).json({ 
       error: 'Server error',
       message: error.message
     });
   }
 };
+ENDOFFILE
