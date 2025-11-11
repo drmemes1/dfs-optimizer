@@ -37,8 +37,6 @@ module.exports = async (req, res) => {
     const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
     const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID;
 
-    console.log('🔍 Starting upload - Agent ID:', INGEST_AGENT_ID);
-
     if (!SWARMNODE_KEY || !INGEST_AGENT_ID) {
       return res.status(500).json({ 
         error: 'Missing configuration',
@@ -54,15 +52,23 @@ module.exports = async (req, res) => {
     if (!csvText || csvText.length < 50) {
       return res.status(400).json({ 
         error: 'Invalid CSV',
-        details: 'CSV is empty or too short'
+        details: 'CSV is empty or too short',
+        length: csvText.length
       });
     }
 
     console.log(`📊 CSV received: ${csvText.length} chars`);
+    console.log(`📝 First 100 chars: ${csvText.substring(0, 100)}`);
 
-    // Call INGEST agent
+    // Send to INGEST agent - simplified payload structure
     const payload = {
       csv_text: csvText,
+      inputs: {
+        csv_text: csvText
+      },
+      data: {
+        csv_text: csvText
+      },
       slate_date: new Date().toISOString().split('T')[0]
     };
 
@@ -72,7 +78,8 @@ module.exports = async (req, res) => {
       payload: payload
     });
 
-    console.log('🚀 Calling INGEST agent...');
+    console.log('🚀 Calling INGEST agent:', INGEST_AGENT_ID);
+    console.log('📦 Payload keys:', Object.keys(payload));
 
     const response = await makeRequest(url, {
       method: 'POST',
@@ -98,6 +105,7 @@ module.exports = async (req, res) => {
         message: '✅ Pipeline started! INGEST → SIGNALS → PROJECTIONS → OPTIMIZER',
         job_id: result.job_id || result.id,
         agent_started: 'INGEST',
+        csv_length: csvText.length,
         swarmnode_link: `https://app.swarmnode.ai`
       });
     } else {
