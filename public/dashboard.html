@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DFS Optimizer Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .stat-card .label {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .value {
+            color: #333;
+            font-size: 28px;
+            font-weight: 600;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th {
+            background: #f8f9ff;
+            padding: 12px;
+            text-align: left;
+            font-size: 14px;
+            color: #666;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+
+        .table tr:hover {
+            background: #fafbff;
+        }
+
+        .error-positive {
+            color: #28a745;
+        }
+
+        .error-negative {
+            color: #dc3545;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: transform 0.2s;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+        }
+
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .actions {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .chart {
+            width: 100%;
+            height: 300px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .nav {
+            background: white;
+            border-radius: 10px;
+            padding: 15px 30px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        .nav a:hover {
+            background: #f8f9ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/">🏀 Optimizer</a>
+            <a href="/dashboard.html">📊 Dashboard</a>
+        </div>
+
+        <div class="header">
+            <h1>📊 DFS Performance Dashboard</h1>
+            <p style="color: #666; margin-top: 10px;">Track accuracy, learn from results, optimize projections</p>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="label">Average MAE</div>
+                    <div class="value" id="avgMae">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Accuracy Rate</div>
+                    <div class="value" id="accuracyRate">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Total Slates</div>
+                    <div class="value" id="totalSlates">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Last Updated</div>
+                    <div class="value" id="lastUpdated" style="font-size: 16px;">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Accuracy Table -->
+            <div class="card">
+                <h2>📈 Recent Performance</h2>
+                <table class="table" id="performanceTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>MAE</th>
+                            <th>RMSE</th>
+                            <th>Accuracy</th>
+                        </tr>
+                    </thead>
+                    <tbody id="performanceBody">
+                        <tr><td colspan="4" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Top Misses -->
+            <div class="card">
+                <h2>❌ Biggest Projection Errors</h2>
+                <table class="table" id="missesTable">
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>Projected</th>
+                            <th>Actual</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody id="missesBody">
+                        <tr><td colspan="4" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="card">
+            <h2>🎯 Actions</h2>
+            <div class="actions">
+                <button class="button" onclick="fetchYesterdayResults()">
+                    📊 Fetch Yesterday's Results
+                </button>
+                <button class="button" onclick="runLearner()">
+                    🧠 Run Learning Algorithm
+                </button>
+                <button class="button" onclick="refreshDashboard()">
+                    🔄 Refresh Data
+                </button>
+            </div>
+            <div id="actionResult" style="margin-top: 20px; padding: 15px; border-radius: 8px; display: none;"></div>
+        </div>
+
+        <!-- Current Weights -->
+        <div class="card">
+            <h2>⚖️ Current Projection Weights</h2>
+            <div id="weightsDisplay">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Factor</th>
+                            <th>Weight</th>
+                            <th>Impact</th>
+                        </tr>
+                    </thead>
+                    <tbody id="weightsBody">
+                        <tr><td colspan="3" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dashboard JavaScript
+        let currentData = null;
+
+        async function refreshDashboard() {
+            try {
+                showLoading();
+                
+                // Fetch dashboard data
+                const response = await fetch('/api/dashboard');
+                const data = await response.json();
+                
+                if (data.ok) {
+                    currentData = data;
+                    updateStats(data);
+                    updatePerformanceTable(data.performance || []);
+                    updateMissesTable(data.top_misses || []);
+                    updateWeights(data.current_weights || {});
+                } else {
+                    showError('Failed to load dashboard data');
+                }
+            } catch (error) {
+                showError('Error: ' + error.message);
+            }
+        }
+
+        function updateStats(data) {
+            document.getElementById('avgMae').textContent = data.avg_mae?.toFixed(2) || '--';
+            document.getElementById('accuracyRate').textContent = 
+                (data.accuracy_rate ? data.accuracy_rate.toFixed(1) + '%' : '--');
+            document.getElementById('totalSlates').textContent = data.total_slates || '--';
+            document.getElementById('lastUpdated').textContent = 
+                new Date(data.last_updated || Date.now()).toLocaleString();
+        }
+
+        function updatePerformanceTable(performance) {
+            const tbody = document.getElementById('performanceBody');
+            
+            if (performance.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No data yet. Run tracker to collect results.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = performance.map(p => `
+                <tr>
+                    <td>${p.date}</td>
+                    <td>${p.mae?.toFixed(2) || '--'}</td>
+                    <td>${p.rmse?.toFixed(2) || '--'}</td>
+                    <td>${p.accuracy ? p.accuracy.toFixed(1) + '%' : '--'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateMissesTable(misses) {
+            const tbody = document.getElementById('missesBody');
+            
+            if (misses.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = misses.slice(0, 10).map(m => `
+                <tr>
+                    <td><strong>${m.player}</strong></td>
+                    <td>${m.projected?.toFixed(1) || '--'}</td>
+                    <td>${m.actual?.toFixed(1) || '--'}</td>
+                    <td class="${m.error >= 0 ? 'error-positive' : 'error-negative'}">
+                        ${m.error >= 0 ? '+' : ''}${m.error?.toFixed(1) || '--'}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateWeights(weights) {
+            const tbody = document.getElementById('weightsBody');
+            
+            const weightNames = {
+                'W_SALARY_PROXY': 'Salary Baseline',
+                'W_MATCHUP': 'Matchup Quality',
+                'W_PACE': 'Game Pace',
+                'W_REST': 'Rest/Fatigue',
+                'W_OPPORTUNITY': 'Opportunity Boost',
+                'W_SENTIMENT': 'News/Momentum'
+            };
+
+            const entries = Object.entries(weights);
+            
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #999;">Using default weights</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = entries.map(([key, value]) => {
+                const impact = value > 0.25 ? 'High' : value > 0.15 ? 'Medium' : 'Low';
+                return `
+                    <tr>
+                        <td>${weightNames[key] || key}</td>
+                        <td><strong>${(value * 100).toFixed(1)}%</strong></td>
+                        <td>${impact}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function fetchYesterdayResults() {
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Fetching...';
+            
+            try {
+                const response = await fetch('/api/tracker', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                
+                const data = await response.json();
+                
+                if (data.ok) {
+                    showActionResult('success', `✅ Results fetched! MAE: ${data.accuracy?.metrics?.mae || 'N/A'}`);
+                    refreshDashboard();
+                } else {
+                    showActionResult('error', `❌ Error: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                showActionResult('error', `❌ Error: ${error.message}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = '📊 Fetch Yesterday\'s Results';
+            }
+        }
+
+        async function runLearner() {
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Learning...';
+            
+            try {
+                const response = await fetch('/api/learner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                
+                const data = await response.json();
+                
+                if (data.ok) {
+                    showActionResult('success', `🧠 Learning complete! Estimated improvement: ${data.estimated_improvement || 'N/A'}`);
+                    refreshDashboard();
+                } else {
+                    showActionResult('error', `❌ Error: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                showActionResult('error', `❌ Error: ${error.message}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = '🧠 Run Learning Algorithm';
+            }
+        }
+
+        function showActionResult(type, message) {
+            const resultDiv = document.getElementById('actionResult');
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = type === 'success' ? '#d4edda' : '#f8d7da';
+            resultDiv.style.color = type === 'success' ? '#155724' : '#721c24';
+            resultDiv.style.border = `1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'}`;
+            resultDiv.textContent = message;
+            
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function showLoading() {
+            // Show loading states
+        }
+
+        function showError(message) {
+            showActionResult('error', message);
+        }
+
+        // Load dashboard on page load
+        document.addEventListener('DOMContentLoaded', refreshDashboard);
+    </script>
+</body>
+</html>
