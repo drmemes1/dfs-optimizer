@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFL DFS Optimizer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            min-height: 100vh;
+            padding: 20px;
+            padding-top: 100px;
+        }
+
+        .top-nav {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 15px 30px;
+            border-radius: 50px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+        }
+
+        .top-nav a {
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .top-nav a.nba {
+            color: #667eea;
+        }
+
+        .top-nav a.nfl {
+            background: #ff6b35;
+            color: white;
+        }
+
+        .top-nav a.dashboard {
+            color: #666;
+        }
+
+        .top-nav a:hover {
+            transform: translateY(-2px);
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 32px;
+        }
+
+        .upload-area {
+            border: 3px dashed #ff6b35;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            background: #fff9f5;
+            transition: all 0.3s;
+        }
+
+        .upload-area:hover {
+            background: #fff0e6;
+            border-color: #f7931e;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        input[type="file"] { display: none; }
+
+        button {
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .filename {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff9f5;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #ff6b35;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="top-nav">
+        <a href="/" class="nba">🏀 NBA</a>
+        <a href="/nfl.html" class="nfl">🏈 NFL</a>
+        <a href="/dashboard.html" class="dashboard">📊 Dashboard</a>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <h1>🏈 NFL DFS Optimizer</h1>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">🏈</div>
+            <h3>Upload DraftKings NFL CSV</h3>
+            <p style="color: #666; margin-top: 10px;">Click to browse or drag & drop</p>
+            <input type="file" id="fileInput" accept=".csv">
+        </div>
+
+        <div class="filename" id="filename"></div>
+        <button id="uploadBtn" disabled>Optimize NFL Lineup</button>
+        <div class="result" id="result"></div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const result = document.getElementById('result');
+        const filename = document.getElementById('filename');
+        let selectedFile = null;
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = '#ffe6d5';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.background = '#fff9f5';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = '#fff9f5';
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.csv')) {
+                showResult('error', '❌ Please upload a CSV file');
+                return;
+            }
+            selectedFile = file;
+            filename.style.display = 'block';
+            filename.textContent = `🏈 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            uploadBtn.disabled = false;
+            result.style.display = 'none';
+        }
+
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span class="loader"></span> Processing...';
+
+            try {
+                const csvText = await selectedFile.text();
+
+                const response = await fetch('/api/upload-nfl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csv: csvText })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showResult('success', `
+                        <h3>✅ Success!</h3>
+                        <p>${data.message}</p>
+                        <p style="margin-top: 10px;">Job ID: ${data.job_id || 'N/A'}</p>
+                        <p style="margin-top: 10px;">
+                            <a href="https://app.swarmnode.ai" target="_blank" style="color: #155724;">View in SwarmNode →</a>
+                        </p>
+                    `);
+                } else {
+                    showResult('error', `<h3>❌ Error</h3><p>${data.error || 'Unknown error'}</p>`);
+                }
+            } catch (error) {
+                showResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Optimize NFL Lineup';
+            }
+        });
+
+        function showResult(type, message) {
+            result.className = `result ${type}`;
+            result.innerHTML = message;
+            result.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
