@@ -40,8 +40,7 @@ module.exports = async (req, res) => {
     if (!SWARMNODE_KEY || !NFL_INGEST_AGENT_ID) {
       return res.status(500).json({
         ok: false,
-        error: 'Missing configuration',
-        details: 'Add NFL_INGEST_AGENT_ID to Vercel environment variables'
+        error: 'Missing NFL_INGEST_AGENT_ID'
       });
     }
 
@@ -88,14 +87,13 @@ module.exports = async (req, res) => {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return res.status(200).json({
         success: true,
-        message: '🏈 NFL Pipeline started!',
-        job_id: result.job_id || result.id,
-        swarmnode_link: 'https://app.swarmnode.ai'
+        message: '🏈 NFL Pipeline started',
+        job_id: result.job_id || result.id
       });
     } else {
       return res.status(response.statusCode || 500).json({
         ok: false,
-        error: 'NFL INGEST agent failed',
+        error: 'NFL agent failed',
         details: result
       });
     }
