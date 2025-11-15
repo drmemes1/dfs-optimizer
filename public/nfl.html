@@ -5,17 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NFL DFS Optimizer</title>
     <style>
+        /* Same styles as NBA page above */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            background: linear-gradient(135deg, #48c6ef 0%, #6f86d6 100%);
             min-height: 100vh;
             padding: 20px;
             padding-top: 100px;
         }
 
-        .top-nav {
+        .nav {
             position: fixed;
             top: 20px;
             left: 50%;
@@ -29,29 +30,18 @@
             gap: 20px;
         }
 
-        .top-nav a {
+        .nav a {
             text-decoration: none;
             padding: 10px 20px;
             border-radius: 25px;
             font-weight: 600;
+            color: #666;
             transition: all 0.3s;
         }
 
-        .top-nav a.nba {
-            color: #667eea;
-        }
-
-        .top-nav a.nfl {
-            background: #ff6b35;
+        .nav a.active {
+            background: #48c6ef;
             color: white;
-        }
-
-        .top-nav a.dashboard {
-            color: #666;
-        }
-
-        .top-nav a:hover {
-            transform: translateY(-2px);
         }
 
         .container {
@@ -63,36 +53,91 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
 
-        h1 {
-            color: #333;
-            margin-bottom: 30px;
-            font-size: 32px;
-        }
-
+        h1 { color: #333; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+        
         .upload-area {
-            border: 3px dashed #ff6b35;
+            border: 3px dashed #48c6ef;
             border-radius: 15px;
             padding: 40px;
             text-align: center;
             cursor: pointer;
-            background: #fff9f5;
+            background: #fafbff;
             transition: all 0.3s;
+            margin-bottom: 20px;
         }
 
         .upload-area:hover {
-            background: #fff0e6;
-            border-color: #f7931e;
+            background: #f0f8ff;
+            border-color: #6f86d6;
         }
 
-        .upload-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
+        .upload-area.dragover {
+            background: #e6f4ff;
+            border-color: #6f86d6;
+            transform: scale(1.02);
         }
 
         input[type="file"] { display: none; }
 
+        .lock-section {
+            background: #fff8e1;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .lock-section h3 {
+            color: #f57c00;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .lock-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .lock-input-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .lock-input-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .lock-input-group input {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .lock-input-group input:focus {
+            outline: none;
+            border-color: #ffc107;
+        }
+
+        .lock-info {
+            margin-top: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
         button {
-            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            background: linear-gradient(135deg, #48c6ef 0%, #6f86d6 100%);
             color: white;
             border: none;
             padding: 15px 40px;
@@ -101,12 +146,14 @@
             font-weight: 600;
             cursor: pointer;
             width: 100%;
-            margin-top: 20px;
+            transition: transform 0.2s;
         }
 
+        button:hover { transform: translateY(-2px); }
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
+            transform: none;
         }
 
         .result {
@@ -119,84 +166,134 @@
         .result.success {
             background: #d4edda;
             color: #155724;
+            border: 2px solid #c3e6cb;
         }
 
         .result.error {
             background: #f8d7da;
             color: #721c24;
+            border: 2px solid #f5c6cb;
         }
 
-        .filename {
-            margin-top: 15px;
+        .lineup {
+            margin-top: 20px;
+            font-family: monospace;
+            background: #f8f9fa;
             padding: 15px;
-            background: #fff9f5;
             border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        .locked-player-display {
             display: none;
-        }
-
-        .loader {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #ff6b35;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 10px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            margin-top: 10px;
+            padding: 10px;
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #2e7d32;
         }
     </style>
 </head>
 <body>
-    <!-- Navigation Bar -->
-    <div class="top-nav">
-        <a href="/" class="nba">🏀 NBA</a>
-        <a href="/nfl.html" class="nfl">🏈 NFL</a>
-        <a href="/dashboard.html" class="dashboard">📊 Dashboard</a>
+    <div class="nav">
+        <a href="/">🏀 NBA</a>
+        <a href="/nfl.html" class="active">🏈 NFL</a>
+        <a href="/dashboard.html">📊 Dashboard</a>
     </div>
 
-    <!-- Main Container -->
     <div class="container">
         <h1>🏈 NFL DFS Optimizer</h1>
-        
+        <p class="subtitle">Upload your DraftKings CSV for optimized lineups</p>
+
+        <!-- LOCK PLAYER SECTION -->
+        <div class="lock-section">
+            <h3>🔒 Lock Player (Optional)</h3>
+            <div class="lock-inputs">
+                <div class="lock-input-group">
+                    <label>Player Last Name</label>
+                    <input 
+                        type="text" 
+                        id="lockedPlayerName" 
+                        placeholder="e.g., Mahomes"
+                        autocomplete="off"
+                    />
+                </div>
+                <div class="lock-input-group">
+                    <label>Salary Cap (Optional)</label>
+                    <input 
+                        type="number" 
+                        id="lockedPlayerSalary" 
+                        placeholder="Max salary"
+                        min="3000"
+                        max="10000"
+                    />
+                </div>
+            </div>
+            <div class="lock-info">
+                💡 <strong>How it works:</strong> Enter a player's last name to guarantee them in your lineup. 
+                Optionally set a max salary to find value plays with that name.
+            </div>
+            <div class="locked-player-display" id="lockedPlayerDisplay"></div>
+        </div>
+
         <div class="upload-area" id="uploadArea">
-            <div class="upload-icon">🏈</div>
-            <h3>Upload DraftKings NFL CSV</h3>
+            <div style="font-size: 48px; margin-bottom: 15px;">📊</div>
+            <h3>Upload DraftKings CSV</h3>
             <p style="color: #666; margin-top: 10px;">Click to browse or drag & drop</p>
             <input type="file" id="fileInput" accept=".csv">
         </div>
 
-        <div class="filename" id="filename"></div>
-        <button id="uploadBtn" disabled>Optimize NFL Lineup</button>
+        <button id="optimizeBtn" disabled>🚀 Optimize Lineup</button>
         <div class="result" id="result"></div>
     </div>
 
     <script>
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
-        const uploadBtn = document.getElementById('uploadBtn');
+        const optimizeBtn = document.getElementById('optimizeBtn');
         const result = document.getElementById('result');
-        const filename = document.getElementById('filename');
+        const lockedPlayerName = document.getElementById('lockedPlayerName');
+        const lockedPlayerSalary = document.getElementById('lockedPlayerSalary');
+        const lockedPlayerDisplay = document.getElementById('lockedPlayerDisplay');
+        
         let selectedFile = null;
+
+        // Show locked player feedback
+        lockedPlayerName.addEventListener('input', updateLockedPlayerDisplay);
+        lockedPlayerSalary.addEventListener('input', updateLockedPlayerDisplay);
+
+        function updateLockedPlayerDisplay() {
+            const name = lockedPlayerName.value.trim();
+            const salary = lockedPlayerSalary.value.trim();
+
+            if (name) {
+                let text = `🔒 Will lock player with last name: <strong>${name}</strong>`;
+                if (salary) {
+                    text += ` (max salary: $${parseInt(salary).toLocaleString()})`;
+                }
+                lockedPlayerDisplay.innerHTML = text;
+                lockedPlayerDisplay.style.display = 'block';
+            } else {
+                lockedPlayerDisplay.style.display = 'none';
+            }
+        }
 
         uploadArea.addEventListener('click', () => fileInput.click());
 
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadArea.style.background = '#ffe6d5';
+            uploadArea.classList.add('dragover');
         });
 
         uploadArea.addEventListener('dragleave', () => {
-            uploadArea.style.background = '#fff9f5';
+            uploadArea.classList.remove('dragover');
         });
 
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
-            uploadArea.style.background = '#fff9f5';
+            uploadArea.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) {
                 handleFile(e.dataTransfer.files[0]);
             }
@@ -210,56 +307,92 @@
 
         function handleFile(file) {
             if (!file.name.endsWith('.csv')) {
-                showResult('error', '❌ Please upload a CSV file');
+                showResult('error', '<h3>❌ Invalid File</h3><p>Please upload a CSV file from DraftKings</p>');
                 return;
             }
+
             selectedFile = file;
-            filename.style.display = 'block';
-            filename.textContent = `🏈 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-            uploadBtn.disabled = false;
+            uploadArea.innerHTML = `
+                <div style="font-size: 48px; margin-bottom: 15px;">✅</div>
+                <h3>${file.name}</h3>
+                <p style="color: #666; margin-top: 10px;">Ready to optimize!</p>
+            `;
+            optimizeBtn.disabled = false;
             result.style.display = 'none';
         }
 
-        uploadBtn.addEventListener('click', async () => {
+        optimizeBtn.addEventListener('click', async () => {
             if (!selectedFile) return;
 
-            uploadBtn.disabled = true;
-            uploadBtn.innerHTML = '<span class="loader"></span> Processing...';
+            optimizeBtn.disabled = true;
+            optimizeBtn.textContent = '⏳ Optimizing...';
 
             try {
                 const csvText = await selectedFile.text();
 
-                const response = await fetch('/api/upload-nfl', {
+                // Get locked player info
+                const lockedPlayer = lockedPlayerName.value.trim();
+                const maxSalary = lockedPlayerSalary.value.trim();
+
+                const payload = { 
+                    csv: csvText,
+                    sport: 'nfl'
+                };
+
+                // Add locked player if specified
+                if (lockedPlayer) {
+                    payload.locked_player = {
+                        last_name: lockedPlayer,
+                        max_salary: maxSalary ? parseInt(maxSalary) : null
+                    };
+                }
+
+                const response = await fetch('/api/optimize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ csv: csvText })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
 
                 if (response.ok && data.success) {
-                    showResult('success', `
-                        <h3>✅ Success!</h3>
-                        <p>${data.message}</p>
-                        <p style="margin-top: 10px;">Job ID: ${data.job_id || 'N/A'}</p>
-                        <p style="margin-top: 10px;">
-                            <a href="https://app.swarmnode.ai" target="_blank" style="color: #155724;">View in SwarmNode →</a>
+                    let resultHTML = `
+                        <h3>✅ Optimal Lineup Generated!</h3>
+                        <p><strong>Total Salary:</strong> ${data.total_salary || 'N/A'}</p>
+                        <p><strong>Projected Points:</strong> ${data.total_projection || 'N/A'}</p>
+                    `;
+
+                    if (data.locked_player_used) {
+                        resultHTML += `<p style="margin-top: 10px; color: #4caf50;">🔒 <strong>Locked:</strong> ${data.locked_player_used}</p>`;
+                    }
+
+                    if (data.lineup) {
+                        resultHTML += `<div class="lineup"><pre>${data.lineup}</pre></div>`;
+                    }
+
+                    resultHTML += `
+                        <p style="margin-top: 20px; font-size: 14px; color: #666;">
+                            <strong>Job ID:</strong> <code>${data.job_id || 'N/A'}</code><br>
+                            <a href="https://app.swarmnode.ai" target="_blank" style="color: #48c6ef;">View in SwarmNode →</a>
                         </p>
-                    `);
+                    `;
+
+                    showResult('success', resultHTML);
                 } else {
-                    showResult('error', `<h3>❌ Error</h3><p>${data.error || 'Unknown error'}</p>`);
+                    showResult('error', `<h3>❌ Optimization Failed</h3><p>${data.error || 'Unknown error occurred'}</p>`);
                 }
+
             } catch (error) {
                 showResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
             } finally {
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Optimize NFL Lineup';
+                optimizeBtn.disabled = false;
+                optimizeBtn.textContent = '🚀 Optimize Lineup';
             }
         });
 
-        function showResult(type, message) {
+        function showResult(type, html) {
             result.className = `result ${type}`;
-            result.innerHTML = message;
+            result.innerHTML = html;
             result.style.display = 'block';
         }
     </script>
