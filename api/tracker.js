@@ -1,4 +1,3 @@
-// api/tracker.js
 const https = require('https');
 
 function makeRequest(url, options, postData) {
@@ -7,7 +6,7 @@ function makeRequest(url, options, postData) {
     const reqOptions = {
       hostname: urlObj.hostname,
       path: urlObj.pathname,
-      method: options.method || 'GET',
+      method: options.method || 'POST',
       headers: options.headers || {}
     };
     
@@ -37,54 +36,33 @@ module.exports = async (req, res) => {
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
     const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
     const TRACKER_AGENT_ID = process.env.TRACKER_AGENT_ID;
+    const SPORTSDATA_API_KEY = process.env.SPORTSDATA_API_KEY;
 
     if (!SWARMNODE_KEY || !TRACKER_AGENT_ID) {
       return res.status(500).json({
         ok: false,
-        error: 'Missing TRACKER_AGENT_ID in Vercel env variables'
+        error: 'Missing configuration',
+        details: 'Add TRACKER_AGENT_ID to Vercel environment variables'
       });
     }
 
-    const jobId = req.body?.job_id || '';
+    const csvText = req.body?.csv || '';
     const slateDate = req.body?.slate_date || new Date().toISOString().split('T')[0];
 
-    if (!jobId) {
+    if (!csvText || csvText.length < 50) {
       return res.status(400).json({
         ok: false,
-        error: 'Missing job_id',
-        details: 'Provide the Optimizer job ID'
+        error: 'Invalid CSV'
       });
     }
 
-    console.log(`📊 TRACKER: Fetching optimizer results from job ${jobId}`);
+    console.log(`📊 TRACKER: Processing results for ${slateDate}`);
 
-    // Fetch the optimizer job results
-    const jobUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${jobId}/`;
-    const jobResponse = await makeRequest(jobUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${SWARMNODE_KEY}`
-      }
-    });
-
-    if (jobResponse.statusCode !== 200) {
-      return res.status(404).json({
-        ok: false,
-        error: 'Could not fetch optimizer job',
-        job_id: jobId
-      });
-    }
-
-    const jobData = JSON.parse(jobResponse.body);
-    const optimizerOutput = jobData.output || {};
-
-    console.log(`✅ Fetched optimizer output`);
-
-    // Call TRACKER agent with optimizer output + slate date
+    // Call TRACKER agent
     const payload = {
-      optimizer_output: optimizerOutput,
+      results_csv: csvText,
       slate_date: slateDate,
-      optimizer_job_id: jobId
+      sportsdata_api_key: SPORTSDATA_API_KEY
     };
 
     const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
@@ -112,9 +90,8 @@ module.exports = async (req, res) => {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return res.status(200).json({
         success: true,
-        message: `📈 TRACKER analyzing ${slateDate} results`,
-        tracker_job_id: result.job_id || result.id,
-        optimizer_job_id: jobId,
+        message: `📈 TRACKER analyzing results for ${slateDate}`,
+        job_id: result.job_id || result.id,
         swarmnode_link: 'https://app.swarmnode.ai'
       });
     } else {
