@@ -279,6 +279,119 @@
             <div id="actionResult" style="margin-top: 20px; padding: 15px; border-radius: 8px; display: none;"></div>
         </div>
 
+        <!-- Add this section in dashboard.html after the existing Actions card -->
+
+    <div class="card" style="margin-top: 20px;">
+    <h2>📈 Learn from Results</h2>
+    <p style="color: #666; margin-bottom: 20px;">
+        After your slate completes, paste the Optimizer job ID to analyze actual vs projected performance.
+    </p>
+    
+    <div style="margin-bottom: 15px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600;">
+            Optimizer Job ID:
+        </label>
+        <input 
+            type="text" 
+            id="jobIdInput" 
+            placeholder="e.g., 6269f29e-610b-4274-a663-fafcbc2c4399"
+            style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: monospace;"
+        />
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600;">
+            Slate Date:
+        </label>
+        <input 
+            type="date" 
+            id="slateDate" 
+            style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px;"
+        />
+    </div>
+    
+    <button class="button" onclick="runTracker()">
+        🧠 Analyze Results & Learn
+    </button>
+    
+    <div id="trackerResult" style="margin-top: 20px; padding: 15px; border-radius: 8px; display: none;"></div>
+</div>
+
+<script>
+// Set default date to yesterday
+document.addEventListener('DOMContentLoaded', () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    document.getElementById('slateDate').value = yesterday.toISOString().split('T')[0];
+});
+
+async function runTracker() {
+    const jobId = document.getElementById('jobIdInput').value.trim();
+    const slateDate = document.getElementById('slateDate').value;
+    const resultDiv = document.getElementById('trackerResult');
+    
+    if (!jobId) {
+        showTrackerResult('error', '❌ Please enter an Optimizer Job ID');
+        return;
+    }
+    
+    if (!slateDate) {
+        showTrackerResult('error', '❌ Please select a slate date');
+        return;
+    }
+    
+    const button = event.target;
+    button.disabled = true;
+    button.textContent = '🔄 Analyzing...';
+    
+    try {
+        const response = await fetch('/api/tracker', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                job_id: jobId,
+                slate_date: slateDate
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showTrackerResult('success', `
+                <h3>✅ Analysis Started!</h3>
+                <p>${data.message}</p>
+                <p style="margin-top: 10px;"><strong>Job ID:</strong> <code>${data.tracker_job_id}</code></p>
+                <p style="margin-top: 10px;">
+                    <a href="https://app.swarmnode.ai" target="_blank" style="color: #155724; font-weight: 600;">
+                        View Learning Report in SwarmNode →
+                    </a>
+                </p>
+            `);
+        } else {
+            showTrackerResult('error', `
+                <h3>❌ Error</h3>
+                <p>${data.error || 'Unknown error'}</p>
+                ${data.details ? `<p style="margin-top: 10px; font-size: 12px; color: #999;">${JSON.stringify(data.details)}</p>` : ''}
+            `);
+        }
+    } catch (error) {
+        showTrackerResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
+    } finally {
+        button.disabled = false;
+        button.textContent = '🧠 Analyze Results & Learn';
+    }
+}
+
+function showTrackerResult(type, message) {
+    const resultDiv = document.getElementById('trackerResult');
+    resultDiv.style.display = 'block';
+    resultDiv.style.background = type === 'success' ? '#d4edda' : '#f8d7da';
+    resultDiv.style.color = type === 'success' ? '#155724' : '#721c24';
+    resultDiv.style.border = `2px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'}`;
+    resultDiv.innerHTML = message;
+}
+</script>
+
         <!-- Current Weights -->
         <div class="card">
             <h2>⚖️ Current Projection Weights</h2>
