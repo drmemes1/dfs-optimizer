@@ -36,11 +36,11 @@ module.exports = async (req, res) => {
 
   try {
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
-    const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
+    const SWARMNODE_BASE = (process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai').replace(/\/$/, '');
     const OPTIMIZER_AGENT_ID =
       process.env.OPTIMIZER_AGENT_ID || '6734a0b0-0555-4975-a1c9-4757ac1d39b3';
 
-    const ingestJobId = req.query.job_id; // just for logging / display
+    const ingestJobId = req.query.job_id; // just for logging/debug
 
     if (!SWARMNODE_KEY) {
       return res.status(500).json({
@@ -49,15 +49,18 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log(`\n🔍 Checking OPTIMIZER results (triggered by job: ${ingestJobId || 'n/a'})`);
+    console.log(`\n🔍 Checking latest OPTIMIZER job (triggered by job: ${ingestJobId})`);
 
-    // -------------------------------------------------------------------
-    // STEP 1: List latest job for this OPTIMIZER agent
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // STEP 1: list latest agent-executor jobs for this optimizer agent
+    // ------------------------------------------------------------------
+    // This hits the global agent-executor jobs endpoint and filters by agent_id.
     const listUrl =
-      `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/?limit=1&ordering=-created_at`;
+      `${SWARMNODE_BASE}/v1/agent-executor-jobs/?` +
+      `agent_id=${encodeURIComponent(OPTIMIZER_AGENT_ID)}` +
+      `&ordering=-created_at&limit=5`;
 
-    console.log('Step 1: Listing latest OPTIMIZER job from:', listUrl);
+    console.log('Step 1: Listing optimizer jobs from:', listUrl);
 
     const listResponse = await makeRequest(listUrl, {
       method: 'GET',
@@ -70,11 +73,11 @@ module.exports = async (req, res) => {
     console.log('List response status:', listResponse.statusCode);
 
     if (listResponse.statusCode !== 200) {
-      console.error('Failed to list optimizer jobs:', listResponse.statusCode);
+      console.error('Failed to list optimizer jobs:', listResponse.statusCode, listResponse.body);
       return res.status(200).json({
         success: true,
         status: 'processing',
-        message: 'Waiting for optimization to start...'
+        message: 'Waiting for optimization to complete...'
       });
     }
 
@@ -82,17 +85,18 @@ module.exports = async (req, res) => {
     try {
       listData = JSON.parse(listResponse.body);
     } catch (e) {
-      console.error('Failed to parse job list response', e);
+      console.error('Failed to parse optimizer jobs list:', e.message);
       return res.status(502).json({
         success: false,
-        error: 'Invalid job list response from SwarmNode'
+        error: 'Invalid response from SwarmNode (jobs list)'
       });
     }
 
+    // SwarmNode usually wraps results in "results"
     const jobs = listData.results || listData.jobs || [];
-    console.log(`Found ${jobs.length} job(s)`);
+    console.log(`Found ${jobs.length} optimizer job(s)`);
 
-    if (jobs.length === 0) {
+    if (!jobs.length) {
       return res.status(200).json({
         success: true,
         status: 'processing',
@@ -100,17 +104,18 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Take the newest job (first because of ordering=-created_at)
     const latestJob = jobs[0];
-    const latestJobId = latestJob.id;
-    console.log(`Latest job: ${latestJobId}, status=${latestJob.status}`);
+    console.log(
+      `Latest OPTIMIZER job: ${latestJob.id}, status=${latestJob.status}, agent_id=${latestJob.agent_id}`
+    );
 
-    // -------------------------------------------------------------------
-    // STEP 2: Retrieve full job to get RETURN VALUE (lineup)
-    // -------------------------------------------------------------------
-    const retrieveUrl =
-      `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latestJobId}/`;
+    // ------------------------------------------------------------------
+    // STEP 2: fetch full job details (to get return_value)
+    // ------------------------------------------------------------------
+    const retrieveUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latestJob.id}/`;
 
-    console.log('Step 2: Retrieving job details from:', retrieveUrl);
+    console.log('Step 2: Retrieving full job details from:', retrieveUrl);
 
     const retrieveResponse = await makeRequest(retrieveUrl, {
       method: 'GET',
@@ -123,7 +128,7 @@ module.exports = async (req, res) => {
     console.log('Retrieve response status:', retrieveResponse.statusCode);
 
     if (retrieveResponse.statusCode !== 200) {
-      console.error('Failed to retrieve job details:', retrieveResponse.statusCode);
+      console.error('Failed to retrieve optimizer job:', retrieveResponse.statusCode, retrieveResponse.body);
       return res.status(200).json({
         success: true,
         status: 'processing',
@@ -135,10 +140,10 @@ module.exports = async (req, res) => {
     try {
       jobDetails = JSON.parse(retrieveResponse.body);
     } catch (e) {
-      console.error('Failed to parse job details', e);
+      console.error('Failed to parse optimizer job details:', e.message);
       return res.status(502).json({
         success: false,
-        error: 'Invalid job detail response from SwarmNode'
+        error: 'Invalid job response from SwarmNode'
       });
     }
 
@@ -150,15 +155,15 @@ module.exports = async (req, res) => {
       has_return_value: !!jobDetails.return_value
     });
 
-    const isCompleted =
-      jobDetails.status === 'completed' || jobDetails.status === 'success';
+    const status = jobDetails.status;
+    const isCompleted = status === 'completed' || status === 'success';
 
-    // The optimizer's main() returns the lineup dict → SwarmNode stores it here:
-    const returnValue =
+    // SwarmNode puts your Python main() return here:
+    const retval =
       jobDetails.return_value || jobDetails.output || jobDetails.result || {};
-    const hasLineup = returnValue.lineup && Array.isArray(returnValue.lineup);
 
-    console.log('Return value has lineup:', hasLineup);
+    const hasLineup = retval.lineup && Array.isArray(retval.lineup);
+    console.log('Return value has lineup:', hasLineup ? `yes (${retval.lineup.length})` : 'no');
 
     if (isCompleted && hasLineup) {
       console.log(`✅ Completed lineup found for job ${jobDetails.id}`);
@@ -166,22 +171,17 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         status: 'completed',
-        lineup: returnValue.lineup || [],
-        stats: returnValue.stats || {},
-        locked_player_used: returnValue.locked_player_used || null,
-        lineup_export: returnValue.lineup_export || null,
-        recommendations: returnValue.recommendations || [],
+        lineup: retval.lineup || [],
+        stats: retval.stats || {},
+        locked_player_used: retval.locked_player_used || null,
+        lineup_export: retval.lineup_export || null,
+        recommendations: retval.recommendations || [],
         job_id: jobDetails.id,
         created_at: jobDetails.created_at
       });
     }
 
-    // Still running?
-    if (
-      jobDetails.status === 'running' ||
-      jobDetails.status === 'pending' ||
-      jobDetails.status === 'queued'
-    ) {
+    if (status === 'running' || status === 'pending' || status === 'queued') {
       console.log('Job still processing...');
       return res.status(200).json({
         success: true,
@@ -190,9 +190,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Failed?
-    if (jobDetails.status === 'failed' || jobDetails.status === 'error') {
-      console.error('Job failed:', jobDetails.error);
+    if (status === 'failed' || status === 'error') {
+      console.error('Optimizer job failed:', jobDetails.error);
       return res.status(200).json({
         success: false,
         status: 'failed',
@@ -200,13 +199,12 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Completed but no lineup yet – rare edge case
-    console.log('Job completed but no lineup on return_value yet');
+    console.log('Job completed but no lineup present yet, status=', status);
     return res.status(200).json({
       success: true,
       status: 'processing',
       message: 'Waiting for lineup data...',
-      debug_status: jobDetails.status
+      debug_status: status
     });
 
   } catch (error) {
