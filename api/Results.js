@@ -1,4 +1,4 @@
-// api/results-v2.js - Look up optimizer jobs directly
+// api/results.js - Get latest OPTIMIZER result
 const https = require('https');
 
 function makeRequest(url, options) {
@@ -40,13 +40,6 @@ module.exports = async (req, res) => {
     
     const ingestJobId = req.query.job_id;
     
-    if (!ingestJobId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing job_id parameter'
-      });
-    }
-
     if (!SWARMNODE_KEY) {
       return res.status(500).json({
         success: false,
@@ -54,11 +47,15 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log(`\n📋 Looking for OPTIMIZER results for ingest job: ${ingestJobId}`);
+    console.log(`\n🔍 Fetching latest OPTIMIZER result (triggered by job: ${ingestJobId})`);
 
-    // Strategy 1: Check the ingest job and follow spawned_jobs
-    const ingestUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${ingestJobId}/`;
-    const ingestResponse = await makeRequest(ingestUrl, {
+    // Get the latest job from OPTIMIZER agent
+    // API: GET /v1/agents/{agent_id}/jobs/
+    const url = `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/?limit=1&ordering=-created_at`;
+    
+    console.log('Fetching latest optimizer job from:', url);
+
+    const response = await makeRequest(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${SWARMNODE_KEY}`,
@@ -66,150 +63,103 @@ module.exports = async (req, res) => {
       }
     });
 
-    let ingestJob;
+    console.log('Response status:', response.statusCode);
+
+    if (response.statusCode !== 200) {
+      console.error('Failed to fetch optimizer jobs:', response.statusCode);
+      return res.status(200).json({
+        success: true,
+        status: 'processing',
+        message: 'Waiting for optimization to complete...'
+      });
+    }
+
+    let data;
     try {
-      ingestJob = JSON.parse(ingestResponse.body);
+      data = JSON.parse(response.body);
     } catch (e) {
-      console.error('Failed to parse ingest job response');
+      console.error('Failed to parse response');
       return res.status(502).json({
         success: false,
         error: 'Invalid response from SwarmNode'
       });
     }
 
-    console.log('Ingest job status:', ingestJob.status);
-    console.log('Spawned jobs:', ingestJob.spawned_jobs);
+    // SwarmNode returns jobs in 'results' or 'jobs' array
+    const jobs = data.results || data.jobs || [];
+    console.log(`Found ${jobs.length} job(s)`);
 
-    // Follow the chain of spawned jobs
-    const jobsToCheck = [ingestJobId, ...(ingestJob.spawned_jobs || [])];
-    
-    console.log(`Checking ${jobsToCheck.length} jobs in the pipeline...`);
-
-    for (const jobId of jobsToCheck) {
-      try {
-        const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${jobId}/`;
-        const response = await makeRequest(url, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${SWARMNODE_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.statusCode !== 200) {
-          console.log(`Job ${jobId} returned status ${response.statusCode}`);
-          continue;
-        }
-
-        const job = JSON.parse(response.body);
-        console.log(`Job ${jobId}: agent=${job.agent_id}, status=${job.status}`);
-
-        // Check if this is the optimizer (has lineup data)
-        const output = job.output || {};
-        
-        if (output.lineup && Array.isArray(output.lineup) && output.lineup.length > 0) {
-          console.log(`✅ Found OPTIMIZER output with ${output.lineup.length} players!`);
-          
-          return res.status(200).json({
-            success: true,
-            status: 'completed',
-            lineup: output.lineup,
-            stats: output.stats || {},
-            locked_player_used: output.locked_player_used || null,
-            lineup_export: output.lineup_export || null,
-            recommendations: output.recommendations || [],
-            optimizer_job_id: jobId,
-            ingest_job_id: ingestJobId
-          });
-        }
-
-        // If this job has spawned more jobs, add them to check
-        if (job.spawned_jobs && job.spawned_jobs.length > 0) {
-          console.log(`Adding ${job.spawned_jobs.length} more spawned jobs to check`);
-          jobsToCheck.push(...job.spawned_jobs);
-        }
-
-        // Check if job is still running
-        if (job.status === 'running' || job.status === 'pending' || job.status === 'queued') {
-          console.log('Pipeline still processing...');
-        }
-
-        // Check if job failed
-        if (job.status === 'failed' || job.status === 'error') {
-          console.error('Job failed:', job.error || 'Unknown error');
-          return res.status(200).json({
-            success: false,
-            status: 'failed',
-            error: job.error || 'Pipeline job failed'
-          });
-        }
-
-      } catch (error) {
-        console.error(`Error checking job ${jobId}:`, error.message);
-        continue;
-      }
-    }
-
-    // Strategy 2: If we didn't find it, list recent optimizer jobs
-    console.log('Lineup not found in spawned jobs, checking recent optimizer jobs...');
-    
-    const listUrl = `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/?limit=10`;
-    
-    try {
-      const listResponse = await makeRequest(listUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${SWARMNODE_KEY}`,
-          'Content-Type': 'application/json'
-        }
+    if (jobs.length === 0) {
+      console.log('No optimizer jobs found yet');
+      return res.status(200).json({
+        success: true,
+        status: 'processing',
+        message: 'Waiting for optimization to start...'
       });
-
-      if (listResponse.statusCode === 200) {
-        const jobsList = JSON.parse(listResponse.body);
-        const recentJobs = jobsList.results || jobsList.jobs || [];
-        
-        console.log(`Found ${recentJobs.length} recent optimizer jobs`);
-        
-        // Find the most recent completed job
-        const completedJob = recentJobs.find(j => 
-          j.status === 'completed' && 
-          j.output?.lineup?.length > 0
-        );
-
-        if (completedJob) {
-          console.log('✅ Found recent completed optimizer job');
-          return res.status(200).json({
-            success: true,
-            status: 'completed',
-            lineup: completedJob.output.lineup,
-            stats: completedJob.output.stats || {},
-            locked_player_used: completedJob.output.locked_player_used || null,
-            lineup_export: completedJob.output.lineup_export || null,
-            recommendations: completedJob.output.recommendations || [],
-            optimizer_job_id: completedJob.id,
-            note: 'Found via recent jobs list'
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error listing optimizer jobs:', error.message);
     }
 
-    // Still processing
+    // Get the latest job (should be only 1)
+    const latestJob = jobs[0];
+    
+    console.log(`Latest job: ${latestJob.id}, status=${latestJob.status}`);
+
+    // Check if completed with lineup
+    const isCompleted = latestJob.status === 'completed' || latestJob.status === 'success';
+    const hasLineup = latestJob.output?.lineup && Array.isArray(latestJob.output.lineup);
+
+    if (isCompleted && hasLineup) {
+      // Success!
+      console.log(`✅ Found completed lineup! Job ID: ${latestJob.id}`);
+      
+      const output = latestJob.output || {};
+      
+      return res.status(200).json({
+        success: true,
+        status: 'completed',
+        lineup: output.lineup || [],
+        stats: output.stats || {},
+        locked_player_used: output.locked_player_used || null,
+        lineup_export: output.lineup_export || null,
+        recommendations: output.recommendations || [],
+        job_id: latestJob.id,
+        created_at: latestJob.created_at
+      });
+    }
+
+    // Check if still running
+    if (latestJob.status === 'running' || latestJob.status === 'pending' || latestJob.status === 'queued') {
+      console.log('Job still processing...');
+      return res.status(200).json({
+        success: true,
+        status: 'processing',
+        message: 'Optimization in progress...'
+      });
+    }
+
+    // Check if failed
+    if (latestJob.status === 'failed' || latestJob.status === 'error') {
+      console.error('Job failed:', latestJob.error);
+      return res.status(200).json({
+        success: false,
+        status: 'failed',
+        error: latestJob.error || 'Optimization failed'
+      });
+    }
+
+    // Unknown status
+    console.log('Unknown job status:', latestJob.status);
     return res.status(200).json({
       success: true,
       status: 'processing',
-      message: 'Pipeline still processing... This can take 20-40 seconds.',
-      jobs_checked: jobsToCheck.length
+      message: `Job status: ${latestJob.status}`
     });
 
   } catch (error) {
-    console.error('❌ Results endpoint error:', error);
+    console.error('❌ Error:', error.message);
     
     return res.status(500).json({
       success: false,
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 };
