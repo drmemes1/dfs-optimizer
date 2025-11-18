@@ -44,7 +44,7 @@
         }
 
         .container {
-            max-width: 700px;
+            max-width: 800px;
             margin: 0 auto;
             background: white;
             border-radius: 20px;
@@ -174,13 +174,101 @@
             border: 2px solid #f5c6cb;
         }
 
-        .lineup {
+        .result.processing {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffeaa7;
+        }
+
+        .lineup-table {
             margin-top: 20px;
-            font-family: monospace;
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .lineup-table th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .lineup-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 14px;
+        }
+
+        .lineup-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .lineup-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .locked-row {
+            background: #fff8e1 !important;
+        }
+
+        .locked-badge {
+            display: inline-block;
+            background: #ffc107;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
             background: #f8f9fa;
             padding: 15px;
             border-radius: 8px;
-            overflow-x: auto;
+            border: 1px solid #e0e0e0;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         .locked-player-display {
@@ -192,6 +280,38 @@
             border-radius: 4px;
             font-size: 14px;
             color: #2e7d32;
+        }
+
+        .recommendations {
+            margin-top: 20px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .recommendations h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .recommendations ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .recommendations li {
+            padding: 5px 0;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .poll-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            text-align: center;
         }
     </style>
 </head>
@@ -206,7 +326,6 @@
         <h1>🏀 NBA DFS Optimizer</h1>
         <p class="subtitle">Upload your DraftKings CSV for optimized lineups</p>
 
-        <!-- LOCK PLAYER SECTION -->
         <div class="lock-section">
             <h3>🔒 Lock Player (Optional)</h3>
             <div class="lock-inputs">
@@ -258,8 +377,10 @@
         const lockedPlayerDisplay = document.getElementById('lockedPlayerDisplay');
         
         let selectedFile = null;
+        let pollingInterval = null;
+        let pollAttempts = 0;
+        const MAX_POLL_ATTEMPTS = 60;
 
-        // Show locked player feedback
         lockedPlayerName.addEventListener('input', updateLockedPlayerDisplay);
         lockedPlayerSalary.addEventListener('input', updateLockedPlayerDisplay);
 
@@ -320,8 +441,135 @@
             result.style.display = 'none';
         }
 
+        async function pollForResults(jobId) {
+            pollAttempts++;
+
+            if (pollAttempts > MAX_POLL_ATTEMPTS) {
+                if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                }
+                showResult('error', `
+                    <h3>⏱️ Timeout</h3>
+                    <p>Optimization is taking longer than expected. Please check SwarmNode for results:</p>
+                    <p style="margin-top: 10px;"><a href="https://app.swarmnode.ai" target="_blank" style="color: #667eea;">View in SwarmNode →</a></p>
+                `);
+                optimizeBtn.disabled = false;
+                optimizeBtn.textContent = '🚀 Optimize Lineup';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/results?job_id=${jobId}`);
+                const data = await response.json();
+
+                console.log('Poll result:', data);
+
+                const statusEl = document.querySelector('.poll-status');
+                if (statusEl) {
+                    statusEl.textContent = `Checking results... (attempt ${pollAttempts}/${MAX_POLL_ATTEMPTS})`;
+                }
+
+                if (data.success && data.status === 'completed' && data.lineup) {
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                    displayLineup(data);
+                } else if (data.status === 'failed' || (data.success === false && data.status !== 'processing')) {
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                    showResult('error', `<h3>❌ Optimization Failed</h3><p>${data.error || 'Unknown error'}</p>`);
+                    optimizeBtn.disabled = false;
+                    optimizeBtn.textContent = '🚀 Optimize Lineup';
+                }
+
+            } catch (error) {
+                console.error('Polling error:', error);
+                
+                if (pollAttempts >= MAX_POLL_ATTEMPTS) {
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                    showResult('error', `<h3>❌ Error</h3><p>Failed to fetch results: ${error.message}</p>`);
+                    optimizeBtn.disabled = false;
+                    optimizeBtn.textContent = '🚀 Optimize Lineup';
+                }
+            }
+        }
+
+        function displayLineup(data) {
+            const lineup = data.lineup || [];
+            const stats = data.stats || {};
+            const recommendations = data.recommendations || [];
+            const lockedPlayer = data.locked_player_used;
+
+            let html = '<h3>✅ Optimal Lineup Generated!</h3>';
+
+            html += '<div class="stats-grid">';
+            html += `<div class="stat-card">
+                <div class="stat-label">Total Salary</div>
+                <div class="stat-value">${stats.total_salary || 'N/A'}</div>
+            </div>`;
+            html += `<div class="stat-card">
+                <div class="stat-label">Projection</div>
+                <div class="stat-value">${stats.total_projection || 'N/A'} pts</div>
+            </div>`;
+            html += `<div class="stat-card">
+                <div class="stat-label">Salary Used</div>
+                <div class="stat-value">${stats.salary_used_pct || 'N/A'}</div>
+            </div>`;
+            html += '</div>';
+
+            if (lineup.length > 0) {
+                html += '<table class="lineup-table">';
+                html += '<thead><tr><th>Position</th><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value</th></tr></thead>';
+                html += '<tbody>';
+                
+                lineup.forEach(player => {
+                    const isLocked = player.is_locked || false;
+                    const rowClass = isLocked ? 'locked-row' : '';
+                    
+                    html += `<tr class="${rowClass}">`;
+                    html += `<td><strong>${player.slot}</strong></td>`;
+                    html += `<td>${player.name}${isLocked ? '<span class="locked-badge">LOCKED</span>' : ''}</td>`;
+                    html += `<td>${player.team || 'N/A'}</td>`;
+                    html += `<td>${player.salary}</td>`;
+                    html += `<td>${player.projection}</td>`;
+                    html += `<td>${player.value}</td>`;
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table>';
+            }
+
+            if (recommendations.length > 0) {
+                html += '<div class="recommendations">';
+                html += '<h4>📊 Analysis</h4>';
+                html += '<ul>';
+                recommendations.forEach(rec => {
+                    if (rec && rec.trim()) html += `<li>${rec}</li>`;
+                });
+                html += '</ul>';
+                html += '</div>';
+            }
+
+            showResult('success', html);
+            optimizeBtn.disabled = false;
+            optimizeBtn.textContent = '🚀 Optimize Lineup';
+        }
+
         optimizeBtn.addEventListener('click', async () => {
             if (!selectedFile) return;
+
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+            pollAttempts = 0;
 
             optimizeBtn.disabled = true;
             optimizeBtn.textContent = '⏳ Optimizing...';
@@ -329,7 +577,6 @@
             try {
                 const csvText = await selectedFile.text();
 
-                // Get locked player info
                 const lockedPlayer = lockedPlayerName.value.trim();
                 const maxSalary = lockedPlayerSalary.value.trim();
 
@@ -338,7 +585,6 @@
                     sport: 'nba'
                 };
 
-                // Add locked player if specified
                 if (lockedPlayer) {
                     payload.locked_player = {
                         last_name: lockedPlayer,
@@ -355,35 +601,27 @@
                 const data = await response.json();
 
                 if (response.ok && data.success) {
-                    let resultHTML = `
-                        <h3>✅ Optimal Lineup Generated!</h3>
-                        <p><strong>Total Salary:</strong> ${data.total_salary || 'N/A'}</p>
-                        <p><strong>Projected Points:</strong> ${data.total_projection || 'N/A'}</p>
-                    `;
+                    const jobId = data.job_id;
+                    
+                    showResult('processing', `
+                        <h3>⏳ Optimization in Progress...</h3>
+                        <div class="spinner"></div>
+                        <p style="margin-top: 10px;">Processing your lineup through the agent pipeline...</p>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">Job ID: <code>${jobId}</code></p>
+                        <p class="poll-status">Checking results...</p>
+                    `);
 
-                    if (data.locked_player_used) {
-                        resultHTML += `<p style="margin-top: 10px; color: #4caf50;">🔒 <strong>Locked:</strong> ${data.locked_player_used}</p>`;
-                    }
+                    pollingInterval = setInterval(() => pollForResults(jobId), 3000);
+                    setTimeout(() => pollForResults(jobId), 2000);
 
-                    if (data.lineup) {
-                        resultHTML += `<div class="lineup"><pre>${data.lineup}</pre></div>`;
-                    }
-
-                    resultHTML += `
-                        <p style="margin-top: 20px; font-size: 14px; color: #666;">
-                            <strong>Job ID:</strong> <code>${data.job_id || 'N/A'}</code><br>
-                            <a href="https://app.swarmnode.ai" target="_blank" style="color: #667eea;">View in SwarmNode →</a>
-                        </p>
-                    `;
-
-                    showResult('success', resultHTML);
                 } else {
                     showResult('error', `<h3>❌ Optimization Failed</h3><p>${data.error || 'Unknown error occurred'}</p>`);
+                    optimizeBtn.disabled = false;
+                    optimizeBtn.textContent = '🚀 Optimize Lineup';
                 }
 
             } catch (error) {
                 showResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
-            } finally {
                 optimizeBtn.disabled = false;
                 optimizeBtn.textContent = '🚀 Optimize Lineup';
             }
