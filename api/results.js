@@ -22,6 +22,33 @@ function makeRequest(url, options) {
   });
 }
 
+// helper to dig out a return_value no matter where they hid it 🙂
+function extractReturnValue(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+
+  // Most likely places
+  if (obj.return_value) return obj.return_value;
+  if (obj.output && obj.output.return_value) return obj.output.return_value;
+  if (obj.result && obj.result.return_value) return obj.result.return_value;
+  if (obj.result && !obj.return_value) return obj.result;
+  if (obj.output && !obj.return_value) return obj.output;
+
+  // Sometimes nested under latest_execution
+  if (obj.latest_execution && obj.latest_execution.return_value) {
+    return obj.latest_execution.return_value;
+  }
+
+  // Or execution.return_value
+  if (obj.execution && obj.execution.return_value) {
+    return obj.execution.return_value;
+  }
+
+  // Last resort: if this already *looks* like the dict we expect (has lineup)
+  if (obj.lineup && Array.isArray(obj.lineup)) return obj;
+
+  return null;
+}
+
 module.exports = async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -48,9 +75,7 @@ module.exports = async (req, res) => {
 
     console.log(`\n🔍 Checking latest OPTIMIZER job (triggered by job: ${ingestJobId})`);
 
-    // ------------------------------------------------------------
-    // STEP 1: list agent-executor jobs for the OPTIMIZER agent
-    // ------------------------------------------------------------
+    // STEP 1: list agent-executor jobs for this optimizer agent
     const listUrl =
       `${SWARMNODE_BASE}/v1/agent-executor-jobs/` +
       `?agent_id=${encodeURIComponent(OPTIMIZER_AGENT_ID)}` +
@@ -118,9 +143,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ------------------------------------------------------------
-    // STEP 2: get agent-executor job details (to read execution_address)
-    // ------------------------------------------------------------
+    // STEP 2: get executor job details – this gives us execution_address
     const execJobUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latestJobId}/`;
     console.log('Step 2: Retrieving executor job details from:', execJobUrl);
 
@@ -174,17 +197,12 @@ module.exports = async (req, res) => {
       has_return_value: !!execJob.return_value
     });
 
-    // If (for some reason) the executor job already has the return_value, use it
-    const directReturn =
-      execJob.return_value || execJob.output || execJob.result || null;
-
-    // ------------------------------------------------------------
-    // STEP 3: follow execution_address to /v1/agent-jobs/
-    // ------------------------------------------------------------
-    let jobDetails = {};
+    // If somehow the executor job already has a return_value, try that first
+    let returnValue = extractReturnValue(execJob);
     let jobStatus = execStatus;
-    let returnValue = directReturn;
+    let jobDetails = execJob;
 
+    // STEP 3: follow execution_address to /v1/agent-jobs/ (inner job)
     if (!returnValue && innerJobId) {
       const innerUrl = `${SWARMNODE_BASE}/v1/agent-jobs/${innerJobId}/`;
       console.log('Step 3: Retrieving inner agent job from:', innerUrl);
@@ -212,11 +230,14 @@ module.exports = async (req, res) => {
         jobDetails = JSON.parse(innerResponse.body);
       } catch (e) {
         console.error('Failed to parse inner agent job:', e.message);
+        console.log('Inner raw body:', innerResponse.body); // 👈 log entire JSON
         return res.status(502).json({
           success: false,
           error: 'Invalid inner job response from SwarmNode'
         });
       }
+
+      console.log('Inner job raw body:', JSON.stringify(jobDetails, null, 2)); // 👈 full dump
 
       jobStatus =
         jobDetails.status ||
@@ -224,32 +245,26 @@ module.exports = async (req, res) => {
         jobDetails.state ||
         jobStatus;
 
-      returnValue =
-        jobDetails.return_value ||
-        jobDetails.output ||
-        jobDetails.result ||
-        null;
+      returnValue = extractReturnValue(jobDetails);
 
       console.log('Inner job summary:', {
         id: jobDetails.id,
         status: jobStatus,
         has_output: !!jobDetails.output,
         has_result: !!jobDetails.result,
-        has_return_value: !!jobDetails.return_value
+        has_return_value: !!(returnValue)
       });
-    } else {
-      jobDetails = execJob; // fall back to executor job object
     }
 
-    // ------------------------------------------------------------
     // STEP 4: interpret status + return_value
-    // ------------------------------------------------------------
-    const lineup = returnValue && returnValue.lineup;
+    const rv = returnValue || {};
+    const lineup = rv.lineup;
     const hasLineup = Array.isArray(lineup) && lineup.length > 0;
 
     const isCompleted =
       jobStatus === 'completed' ||
-      jobStatus === 'success';
+      jobStatus === 'success' ||
+      jobStatus === 'succeeded';
 
     if (isCompleted && hasLineup) {
       console.log(`✅ Found completed lineup! Job ID: ${jobDetails.id}`);
@@ -258,10 +273,10 @@ module.exports = async (req, res) => {
         success: true,
         status: 'completed',
         lineup,
-        stats: returnValue.stats || {},
-        locked_player_used: returnValue.locked_player_used || null,
-        lineup_export: returnValue.lineup_export || null,
-        recommendations: returnValue.recommendations || [],
+        stats: rv.stats || {},
+        locked_player_used: rv.locked_player_used || null,
+        lineup_export: rv.lineup_export || null,
+        recommendations: rv.recommendations || [],
         job_id: jobDetails.id,
         created_at: jobDetails.created_at
       });
