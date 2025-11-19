@@ -37,8 +37,7 @@ module.exports = async (req, res) => {
   try {
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
     const SWARMNODE_BASE = (process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai').replace(/\/$/, '');
-    const OPTIMIZER_AGENT_ID =
-      process.env.OPTIMIZER_AGENT_ID || '6734a0b0-0555-4975-a1c9-4757ac1d39b3';
+    const OPTIMIZER_AGENT_ID = (process.env.OPTIMIZER_AGENT_ID || '6734a0b0-0555-4975-a1c9-4757ac1d39b3').trim();
 
     const ingestJobId = req.query.job_id; // just for logging/debug
 
