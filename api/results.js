@@ -1,234 +1,190 @@
-// api/results.js - Get OPTIMIZER lineup result for a specific job_id
-const https = require('https');
+// api/results.js
+const https = require("https");
 
-function makeRequest(url, options) {
+function makeRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const reqOptions = {
       hostname: urlObj.hostname,
-      path: urlObj.pathname + (urlObj.search || ''),
-      method: options.method || 'GET',
+      path: urlObj.pathname + (urlObj.search || ""),
+      method: options.method || "GET",
       headers: options.headers || {}
     };
 
     const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, body: data });
-      });
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () =>
+        resolve({ statusCode: res.statusCode, body: data })
+      );
     });
 
-    req.on('error', reject);
+    req.on("error", reject);
     req.end();
   });
 }
 
 module.exports = async (req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
-    const SWARMNODE_BASE = (process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai').replace(/\/+$/, '');
+    const SWARMNODE_BASE = "https://api.swarmnode.ai";
+    const OPTIMIZER_AGENT_ID = process.env.OPTIMIZER_AGENT_ID;
 
-    const executorJobId = req.query.job_id;
-
-    if (!SWARMNODE_KEY) {
+    if (!SWARMNODE_KEY || !OPTIMIZER_AGENT_ID) {
       return res.status(500).json({
         success: false,
-        error: 'SWARMNODE_API_KEY not configured'
+        error: "Missing SWARMNODE_API_KEY or OPTIMIZER_AGENT_ID env vars"
       });
     }
 
-    if (!executorJobId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing job_id query parameter'
-      });
-    }
+    console.log("🔍 Checking latest OPTIMIZER job (no ingest, optimizer only)");
 
-    console.log(`\n🔍 Checking results for executor job: ${executorJobId}`);
+    // STEP 1: list latest jobs for the OPTIMIZER agent
+    const listUrl = `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/?ordering=-created_at&limit=1`;
 
-    // -------------------------------------------------------
-    // STEP 1: Get the EXECUTOR job (the one created by ingest)
-    // -------------------------------------------------------
-    const execUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${executorJobId}/`;
-    console.log('Step 1: Retrieving executor job details from:', execUrl);
+    console.log("Step 1: Listing optimizer jobs from:", listUrl);
 
-    const execResp = await makeRequest(execUrl, {
-      method: 'GET',
+    const listResp = await makeRequest(listUrl, {
+      method: "GET",
       headers: {
-        'Authorization': `Bearer ${SWARMNODE_KEY}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${SWARMNODE_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
       }
     });
 
-    console.log('Executor job response status:', execResp.statusCode);
+    console.log("List response status:", listResp.statusCode);
 
-    if (execResp.statusCode !== 200) {
-      // If SwarmNode hasn’t created the executor job yet, treat as processing
-      console.log('Raw executor job response:', execResp.body);
+    if (listResp.statusCode !== 200) {
+      console.error("Failed to list optimizer jobs:", listResp.statusCode);
       return res.status(200).json({
         success: true,
-        status: 'processing',
-        message: 'Waiting for optimization to start...'
+        status: "processing",
+        message: "Waiting for optimizer job to appear..."
       });
     }
 
-    let execJob;
+    let listData;
     try {
-      execJob = JSON.parse(execResp.body);
+      listData = JSON.parse(listResp.body);
     } catch (e) {
-      console.error('Failed to parse executor job JSON:', e.message);
+      console.error("Failed to parse list response:", e.message);
       return res.status(502).json({
         success: false,
-        error: 'Invalid response from SwarmNode (executor job)'
+        error: "Invalid response from SwarmNode (list)"
       });
     }
 
-    const execStatus = execJob.status;
-    const execAddress = execJob.execution_address;
+    const jobs = listData.results || listData.jobs || [];
+    console.log(`Found ${jobs.length} optimizer job(s)`);
 
-    console.log('Executor job summary:', {
-      id: execJob.id,
-      status: execStatus,
-      execution_address: execAddress,
-      has_output: !!execJob.output,
-      has_result: !!execJob.result,
-      has_return_value: !!(execJob.return_value)
-    });
-
-    // If executor still running / queued, just say "processing"
-    if (['pending', 'running', 'queued', 'unknown'].includes(execStatus)) {
+    if (!jobs.length) {
       return res.status(200).json({
         success: true,
-        status: 'processing',
-        message: 'Optimization in progress...'
+        status: "processing",
+        message: "No optimizer jobs yet..."
       });
     }
 
-    // If executor finished but we have a direct return_value on it,
-    // just pass that straight through (nice simple case)
-    if (execJob.return_value) {
-      console.log('✅ Executor job has direct return_value; forwarding it.');
-      const rv = execJob.return_value;
+    const latestJob = jobs[0];
+    console.log(
+      `Latest OPTIMIZER job: ${latestJob.id}, raw status=${latestJob.status}`
+    );
 
-      return res.status(200).json({
-        success: true,
-        status: 'completed',
-        // If return_value already looks like your lineup object, just pass it:
-        ...rv
-      });
-    }
+    // STEP 2: fetch the job details to get return_value
+    const jobDetailsUrl = `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/${latestJob.id}/`;
 
-    // -------------------------------------------------------
-    // STEP 2: Find the INNER AGENT JOB using execution_address
-    // -------------------------------------------------------
-    if (!execAddress) {
-      console.log('Executor job has no execution_address, nothing to drill into.');
-      return res.status(200).json({
-        success: false,
-        status: 'failed',
-        error: 'Executor job completed but no execution_address / return_value found'
-      });
-    }
+    console.log("Step 2: Retrieving optimizer job details from:", jobDetailsUrl);
 
-    // NOTE: endpoint name here is based on SwarmNode’s API pattern:
-    // /v1/agent-jobs/?execution_address=...
-    const innerUrl = `${SWARMNODE_BASE}/v1/agent-jobs/?execution_address=${encodeURIComponent(execAddress)}`;
-    console.log('Step 2: Retrieving inner agent job from:', innerUrl);
-
-    const innerResp = await makeRequest(innerUrl, {
-      method: 'GET',
+    const jobResp = await makeRequest(jobDetailsUrl, {
+      method: "GET",
       headers: {
-        'Authorization': `Bearer ${SWARMNODE_KEY}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${SWARMNODE_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
       }
     });
 
-    console.log('Inner job response status:', innerResp.statusCode);
+    console.log("Job details response status:", jobResp.statusCode);
 
-    if (innerResp.statusCode !== 200) {
-      console.log('Raw inner job response:', innerResp.body);
+    if (jobResp.statusCode !== 200) {
+      // If details aren’t ready yet, treat as still processing
       return res.status(200).json({
         success: true,
-        status: 'processing',
-        message: 'Inner agent job not ready yet...'
+        status: "processing",
+        message: "Optimizer still running..."
       });
     }
 
-    let innerData;
+    let job;
     try {
-      innerData = JSON.parse(innerResp.body);
+      job = JSON.parse(jobResp.body);
     } catch (e) {
-      console.error('Failed to parse inner job JSON:', e.message);
+      console.error("Failed to parse job details:", e.message);
       return res.status(502).json({
         success: false,
-        error: 'Invalid response from SwarmNode (inner job)'
+        error: "Invalid response from SwarmNode (job details)"
       });
     }
 
-    const innerJobs = innerData.results || innerData.jobs || [];
-    console.log(`Found ${innerJobs.length} inner job(s)`);
-
-    if (innerJobs.length === 0) {
-      return res.status(200).json({
-        success: true,
-        status: 'processing',
-        message: 'Inner agent job not found yet...'
-      });
-    }
-
-    const innerJob = innerJobs[0];
-    console.log('Inner job summary:', {
-      id: innerJob.id,
-      status: innerJob.status,
-      has_output: !!innerJob.output
+    const status = job.status || "unknown";
+    console.log("Optimizer job summary:", {
+      id: job.id,
+      status: status,
+      has_output: job.has_output,
+      has_result: job.has_result,
+      has_return_value: job.has_return_value
     });
 
-    // If inner job is still running
-    if (['pending', 'running', 'queued', 'unknown'].includes(innerJob.status)) {
+    // Map statuses
+    if (["pending", "running", "queued", "unknown"].includes(status)) {
       return res.status(200).json({
         success: true,
-        status: 'processing',
-        message: 'Optimizer still running...'
+        status: "processing",
+        message: "Optimizer still running..."
       });
     }
 
-    // -------------------------------------------------------
-    // STEP 3: Extract the OPTIMIZER return value and forward it
-    // -------------------------------------------------------
-    const output = innerJob.output || {};
-    const returnValue = output.return_value || output.returnValue || null;
-
-    if (!returnValue) {
-      console.log('Inner job has no return_value field:', JSON.stringify(output).slice(0, 300));
+    if (["failed", "error"].includes(status)) {
       return res.status(200).json({
         success: false,
-        status: 'failed',
-        error: 'Job completed but no lineup found in return_value'
+        status: "failed",
+        error: job.error || "Optimizer failed"
       });
     }
 
-    console.log('✅ Found return_value from OPTIMIZER, forwarding to client.');
+    // ✔️ The important part: grab the return_value
+    const rv =
+      job.return_value ||
+      (job.output && job.output.return_value) ||
+      job.output;
 
-    // If your OPTIMIZER returns exactly the lineup object you showed earlier,
-    // this just passes it straight through.
+    if (!rv) {
+      console.error("Job completed but no return_value found");
+      return res.status(200).json({
+        success: false,
+        status: "failed",
+        error: "Job completed but no return_value found on optimizer"
+      });
+    }
+
+    // rv is exactly what your OPTIMIZER's Python main() returns
+    // e.g. { ok: True, lineup: [...], stats: {...}, ... }
     return res.status(200).json({
       success: true,
-      status: 'completed',
-      ...returnValue
+      status: "completed",
+      ...rv,
+      job_id: job.id,
+      created_at: job.created_at
     });
-
   } catch (error) {
-    console.error('❌ /api/results error:', error.message);
+    console.error("❌ Error in /api/results:", error);
     return res.status(500).json({
       success: false,
       error: error.message
