@@ -1,4 +1,4 @@
-// api/results.js - Retrieve specific job for return value
+// api/results.js - Retrieve latest OPTIMIZER lineup from SwarmNode
 const https = require('https');
 
 function makeRequest(url, options) {
@@ -14,9 +14,7 @@ function makeRequest(url, options) {
     const req = https.request(reqOptions, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, body: data });
-      });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
     });
 
     req.on('error', reject);
@@ -50,7 +48,9 @@ module.exports = async (req, res) => {
 
     console.log(`\n🔍 Checking latest OPTIMIZER job (triggered by job: ${ingestJobId})`);
 
-    // STEP 1: list optimizer jobs for this agent
+    // ------------------------------------------------------------
+    // STEP 1: list agent-executor jobs for the OPTIMIZER agent
+    // ------------------------------------------------------------
     const listUrl =
       `${SWARMNODE_BASE}/v1/agent-executor-jobs/` +
       `?agent_id=${encodeURIComponent(OPTIMIZER_AGENT_ID)}` +
@@ -88,7 +88,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    // SwarmNode may return {results: [...]} or just [...]
     const jobs = Array.isArray(listData)
       ? listData
       : (listData.results || listData.jobs || []);
@@ -119,11 +118,13 @@ module.exports = async (req, res) => {
       });
     }
 
-    // STEP 2: retrieve full job details to get return_value
-    const retrieveUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latestJobId}/`;
-    console.log('Step 2: Retrieving job details from:', retrieveUrl);
+    // ------------------------------------------------------------
+    // STEP 2: get agent-executor job details (to read execution_address)
+    // ------------------------------------------------------------
+    const execJobUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latestJobId}/`;
+    console.log('Step 2: Retrieving executor job details from:', execJobUrl);
 
-    const retrieveResponse = await makeRequest(retrieveUrl, {
+    const execJobResponse = await makeRequest(execJobUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${SWARMNODE_KEY}`,
@@ -131,10 +132,10 @@ module.exports = async (req, res) => {
       }
     });
 
-    console.log('Retrieve response status:', retrieveResponse.statusCode);
+    console.log('Executor job response status:', execJobResponse.statusCode);
 
-    if (retrieveResponse.statusCode !== 200) {
-      console.error('Failed to retrieve job:', retrieveResponse.statusCode, retrieveResponse.body);
+    if (execJobResponse.statusCode !== 200) {
+      console.error('Failed to retrieve executor job:', execJobResponse.statusCode, execJobResponse.body);
       return res.status(200).json({
         success: true,
         status: 'processing',
@@ -142,39 +143,108 @@ module.exports = async (req, res) => {
       });
     }
 
-    let jobDetails;
+    let execJob;
     try {
-      jobDetails = JSON.parse(retrieveResponse.body);
+      execJob = JSON.parse(execJobResponse.body);
     } catch (e) {
-      console.error('Failed to parse job details:', e.message);
+      console.error('Failed to parse executor job:', e.message);
       return res.status(502).json({
         success: false,
-        error: 'Invalid job response from SwarmNode'
+        error: 'Invalid executor job response from SwarmNode'
       });
     }
 
-    const jobStatus =
-      jobDetails.status ||
-      jobDetails.execution_status ||
-      jobDetails.state ||
+    const execStatus =
+      execJob.status ||
+      execJob.execution_status ||
+      execJob.state ||
       'unknown';
 
-    console.log('Job details summary:', {
-      id: jobDetails.id,
-      status: jobStatus,
-      has_output: !!jobDetails.output,
-      has_result: !!jobDetails.result,
-      has_return_value: !!jobDetails.return_value
+    const innerJobId =
+      execJob.execution_address ||
+      execJob.inner_job_id ||
+      execJob.agent_job_id;
+
+    console.log('Executor job summary:', {
+      id: execJob.id,
+      status: execStatus,
+      execution_address: innerJobId,
+      has_output: !!execJob.output,
+      has_result: !!execJob.result,
+      has_return_value: !!execJob.return_value
     });
 
-    // The optimizer's main() return becomes return_value
-    const returnValue =
-      jobDetails.return_value ||
-      jobDetails.output ||
-      jobDetails.result ||
-      {};
+    // If (for some reason) the executor job already has the return_value, use it
+    const directReturn =
+      execJob.return_value || execJob.output || execJob.result || null;
 
-    const lineup = returnValue.lineup;
+    // ------------------------------------------------------------
+    // STEP 3: follow execution_address to /v1/agent-jobs/
+    // ------------------------------------------------------------
+    let jobDetails = {};
+    let jobStatus = execStatus;
+    let returnValue = directReturn;
+
+    if (!returnValue && innerJobId) {
+      const innerUrl = `${SWARMNODE_BASE}/v1/agent-jobs/${innerJobId}/`;
+      console.log('Step 3: Retrieving inner agent job from:', innerUrl);
+
+      const innerResponse = await makeRequest(innerUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${SWARMNODE_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('Inner agent job response status:', innerResponse.statusCode);
+
+      if (innerResponse.statusCode !== 200) {
+        console.error('Failed to retrieve inner agent job:', innerResponse.statusCode, innerResponse.body);
+        return res.status(200).json({
+          success: true,
+          status: 'processing',
+          message: 'Optimization in progress...'
+        });
+      }
+
+      try {
+        jobDetails = JSON.parse(innerResponse.body);
+      } catch (e) {
+        console.error('Failed to parse inner agent job:', e.message);
+        return res.status(502).json({
+          success: false,
+          error: 'Invalid inner job response from SwarmNode'
+        });
+      }
+
+      jobStatus =
+        jobDetails.status ||
+        jobDetails.execution_status ||
+        jobDetails.state ||
+        jobStatus;
+
+      returnValue =
+        jobDetails.return_value ||
+        jobDetails.output ||
+        jobDetails.result ||
+        null;
+
+      console.log('Inner job summary:', {
+        id: jobDetails.id,
+        status: jobStatus,
+        has_output: !!jobDetails.output,
+        has_result: !!jobDetails.result,
+        has_return_value: !!jobDetails.return_value
+      });
+    } else {
+      jobDetails = execJob; // fall back to executor job object
+    }
+
+    // ------------------------------------------------------------
+    // STEP 4: interpret status + return_value
+    // ------------------------------------------------------------
+    const lineup = returnValue && returnValue.lineup;
     const hasLineup = Array.isArray(lineup) && lineup.length > 0;
 
     const isCompleted =
@@ -198,7 +268,7 @@ module.exports = async (req, res) => {
     }
 
     if (['running', 'pending', 'queued'].includes(jobStatus)) {
-      console.log('Job still processing...');
+      console.log('Job still processing...', jobStatus);
       return res.status(200).json({
         success: true,
         status: 'processing',
