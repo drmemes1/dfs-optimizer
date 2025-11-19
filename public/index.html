@@ -327,10 +327,10 @@
         <p class="subtitle">Upload your DraftKings CSV for optimized lineups</p>
 
         <div class="lock-section">
-            <h3>🔒 Lock Player (Optional)</h3>
+            <h3>🔒 Lock / 🚫 Exclude Players</h3>
             <div class="lock-inputs">
                 <div class="lock-input-group">
-                    <label>Player Last Name</label>
+                    <label>Lock Player (Last Name)</label>
                     <input 
                         type="text" 
                         id="lockedPlayerName" 
@@ -339,7 +339,7 @@
                     />
                 </div>
                 <div class="lock-input-group">
-                    <label>Salary Cap (Optional)</label>
+                    <label>Lock Max Salary (Optional)</label>
                     <input 
                         type="number" 
                         id="lockedPlayerSalary" 
@@ -348,10 +348,22 @@
                         max="12000"
                     />
                 </div>
+                <div class="lock-input-group">
+                    <label>Exclude Players (Last names, comma-separated)</label>
+                    <input 
+                        type="text" 
+                        id="excludedPlayers" 
+                        placeholder="e.g., Curry, Jokic"
+                        autocomplete="off"
+                    />
+                </div>
+                <div class="lock-input-group">
+                    <!-- spacer -->
+                </div>
             </div>
             <div class="lock-info">
                 💡 <strong>How it works:</strong> Enter a player's last name to guarantee them in your lineup. 
-                Optionally set a max salary to find value plays with that name.
+                Use the exclude box to force the optimizer to avoid certain players (by last name).
             </div>
             <div class="locked-player-display" id="lockedPlayerDisplay"></div>
         </div>
@@ -375,6 +387,7 @@
         const lockedPlayerName = document.getElementById('lockedPlayerName');
         const lockedPlayerSalary = document.getElementById('lockedPlayerSalary');
         const lockedPlayerDisplay = document.getElementById('lockedPlayerDisplay');
+        const excludedPlayersInput = document.getElementById('excludedPlayers');
         
         let selectedFile = null;
         let pollingInterval = null;
@@ -505,7 +518,6 @@
             const lineup = data.lineup || [];
             const stats = data.stats || {};
             const recommendations = data.recommendations || [];
-            const lockedPlayer = data.locked_player_used;
 
             let html = '<h3>✅ Optimal Lineup Generated!</h3>';
 
@@ -577,19 +589,28 @@
             try {
                 const csvText = await selectedFile.text();
 
-                const lockedPlayer = lockedPlayerName.value.trim();
+                const lockLastName = lockedPlayerName.value.trim();
                 const maxSalary = lockedPlayerSalary.value.trim();
+                const excludedPlayersRaw = excludedPlayersInput.value.trim();
 
                 const payload = { 
                     csv: csvText,
-                    sport: 'nba'
+                    sport: 'nba',
+                    metadata: {}
                 };
 
-                if (lockedPlayer) {
-                    payload.locked_player = {
-                        last_name: lockedPlayer,
+                if (lockLastName) {
+                    payload.metadata.locked_player = {
+                        last_name: lockLastName,
                         max_salary: maxSalary ? parseInt(maxSalary) : null
                     };
+                }
+
+                if (excludedPlayersRaw) {
+                    payload.metadata.excluded_last_names = excludedPlayersRaw
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean);
                 }
 
                 const response = await fetch('/api/optimize', {
