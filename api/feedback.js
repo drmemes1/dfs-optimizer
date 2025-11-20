@@ -1,38 +1,25 @@
 // api/feedback.js
-const https = require('https');
 
-function makeRequest(url, options, body) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const reqOptions = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + (urlObj.search || ''),
-      method: options.method || 'GET',
-      headers: options.headers || {}
-    };
+function parseLineupCsv(csvText) {
+  if (!csvText) return [];
 
-    const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, body: data });
-      });
-    });
-
-    req.on('error', reject);
-
-    if (body) {
-      req.write(body);
-    }
-    req.end();
-  });
+  return csvText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map(line => {
+      const parts = line.split(',');
+      const name = parts[0]?.trim();
+      const points = parseFloat(parts[1]);
+      return {
+        name,
+        actual_points: isNaN(points) ? null : points
+      };
+    })
+    .filter(p => p.name);
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -42,152 +29,74 @@ module.exports = async (req, res) => {
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
-  const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
-  const SWARMNODE_BASE = (process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai').replace(/\/+$/, '');
-  const LEARNER_AGENT_ID = process.env.LEARNER_AGENT_ID; // <-- set this in Vercel
-
-  if (!SWARMNODE_KEY || !LEARNER_AGENT_ID) {
-    return res.status(500).json({
-      ok: false,
-      error: 'Missing SWARMNODE_API_KEY or LEARNER_AGENT_ID'
-    });
-  }
-
   try {
-    const body = await new Promise((resolve, reject) => {
-      let data = '';
-      req.on('data', chunk => { data += chunk; });
-      req.on('end', () => resolve(data));
-      req.on('error', reject);
-    });
+    const {
+      optimizer_job_id,
+      slate_date,
+      my_lineup_csv,
+      winning_lineup_csv
+    } = req.body || {};
 
-    let payload;
-    try {
-      payload = JSON.parse(body || '{}');
-    } catch (e) {
-      return res.status(400).json({ ok: false, error: 'Invalid JSON body' });
-    }
-
-    const { job_id, lineup, winning_total, winning_lineup } = payload || {};
-
-    if (!job_id || !Array.isArray(lineup) || lineup.length === 0) {
+    if (!optimizer_job_id) {
       return res.status(400).json({
         ok: false,
-        error: 'Missing job_id or lineup in request body'
+        error: 'Missing optimizer_job_id'
       });
     }
 
-    // Normalize lineup payload to send to LEARNER
-    const learningInput = lineup.map(p => ({
-      slot: p.slot,
-      name: p.name,
-      team: p.team || null,
-      salary: p.salary_num || p.salary || null,
-      projection: typeof p.projection === 'number' ? p.projection : null,
-      actual_fp: typeof p.actual_fp === 'number' ? p.actual_fp : null,
-      is_locked: !!p.is_locked
-    }));
+    // Parse the manually entered CSV-style text
+    const myLineup = parseLineupCsv(my_lineup_csv);
+    const winningLineup = parseLineupCsv(winning_lineup_csv);
 
-    const learnerPayload = {
-      optimizer_job_id: job_id,
-      used_lineup: learningInput,
-      winning_total: typeof winning_total === 'number' ? winning_total : null,
-      winning_lineup: Array.isArray(winning_lineup) ? winning_lineup : null,
-      submitted_at: new Date().toISOString()
-    };
+    const learnerAgentId = process.env.LEARNER_AGENT_ID;
+    const apiKey = process.env.SWARMNODE_API_KEY;
 
-    // STEP 1: Create a learner job
-    const createUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
-    const createBody = JSON.stringify({
-      agent_id: LEARNER_AGENT_ID,
-      payload: learnerPayload
-    });
-
-    console.log('📡 Creating LEARNER job at:', createUrl);
-
-    const createResp = await makeRequest(createUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SWARMNODE_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    }, createBody);
-
-    if (![200, 201].includes(createResp.statusCode)) {
-      return res.status(502).json({
+    if (!learnerAgentId || !apiKey) {
+      return res.status(500).json({
         ok: false,
-        error: `Failed to create learner job: ${createResp.statusCode}`,
-        body: createResp.body
+        error: 'Missing LEARNER_AGENT_ID or SWARMNODE_API_KEY env vars'
       });
     }
 
-    let created;
-    try {
-      created = JSON.parse(createResp.body);
-    } catch (e) {
-      return res.status(502).json({
-        ok: false,
-        error: 'Invalid learner create JSON',
-        body: createResp.body
-      });
-    }
-
-    const learnerJobId = created.id || created.execution_address || created.job_id;
-    console.log('🧠 LEARNER job created:', learnerJobId);
-
-    // STEP 2: Poll the learner job a few times for return_value
-    const jobUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${learnerJobId}/`;
-    let jobDetail = null;
-    const maxPolls = 10;
-
-    for (let i = 0; i < maxPolls; i++) {
-      await sleep(1000);
-
-      const jobResp = await makeRequest(jobUrl, {
-        method: 'GET',
+    // Call LEARNER agent on SwarmNode
+    const response = await fetch(
+      `https://api.swarmnode.ai/v1/agents/${learnerAgentId}/execute/`,
+      {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${SWARMNODE_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (jobResp.statusCode !== 200) continue;
-
-      try {
-        jobDetail = JSON.parse(jobResp.body);
-      } catch (e) {
-        continue;
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          optimizer_job_id,
+          slate_date,
+          my_lineup: myLineup,
+          winning_lineup: winningLineup
+        })
       }
+    );
 
-      if (jobDetail.status === 'completed' || jobDetail.status === 'success') {
-        break;
-      }
-    }
+    const data = await response.json();
 
-    if (!jobDetail || !(jobDetail.status === 'completed' || jobDetail.status === 'success')) {
-      // Didn’t finish in time – still useful to know ID
-      return res.status(200).json({
-        ok: true,
-        status: 'processing',
-        learner_job_id: learnerJobId,
-        message: 'Learner job started but not finished yet. Check SwarmNode UI for full details.'
+    if (!response.ok) {
+      return res.status(500).json({
+        ok: false,
+        error: data.error || 'Failed to trigger learner agent',
+        raw: data
       });
     }
 
-    const rv = jobDetail.return_value || jobDetail.output || jobDetail.result || {};
-
+    // Just return whatever the learner agent computed
     return res.status(200).json({
       ok: true,
-      status: jobDetail.status,
-      learner_job_id: learnerJobId,
-      learner_return_value: rv
+      learner_response: data
     });
 
-  } catch (error) {
-    console.error('❌ feedback error:', error);
+  } catch (err) {
+    console.error('Feedback error:', err);
     return res.status(500).json({
       ok: false,
-      error: error.message
+      error: err.message
     });
   }
-};
+}
