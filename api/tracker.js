@@ -1,100 +1,82 @@
 // api/tracker.js
-const https = require('https');
 
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      if (!body) return resolve({});
-      try {
-        resolve(JSON.parse(body));
-      } catch (e) {
-        console.error('Failed to parse JSON body:', e.message);
-        resolve({});
-      }
-    });
-    req.on('error', reject);
-  });
-}
+// Simple in-memory store for tracked slates (resets when function cold-starts)
+let trackedSlates = [];
 
 module.exports = async (req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  // Preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
-    const body = await parseBody(req);
+    // Vercel sometimes gives you a JSON string, sometimes an object.
+    let body = req.body;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch (e) {
+        console.error("TRACKER: Failed to parse JSON body:", e.message);
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid JSON body",
+        });
+      }
+    }
 
-    // Accept several possible field names from the front-end
-    const optimizerJobId =
-      body.optimizer_job_id ||
-      body.optimizerJobId ||
-      body.job_id ||
-      body.jobId ||
-      null;
+    const optimizer_job_id = (body.optimizer_job_id || "").trim();
+    const slate_date = body.slate_date || null;
 
-    const slateDate = body.slate_date || body.slateDate || null;
-    const actualCsv = body.actual_csv || body.actualCsv || '';
+    console.log("🧠 TRACKER received optimizer job:", optimizer_job_id);
+    console.log("🗓  Slate date:", slate_date);
 
-    if (!optimizerJobId || typeof optimizerJobId !== 'string' || !optimizerJobId.trim()) {
+    if (!optimizer_job_id) {
       return res.status(400).json({
         ok: false,
-        error: 'Missing optimizer_job_id (optimizer_job_id / optimizerJobId / job_id)'
+        error: "Missing optimizer_job_id",
       });
     }
 
-    // For now we’re not *really* using the CSVs – just stubbing learning.
-    // Later we’ll parse actualCsv & compare to projections.
-    console.log('📈 TRACKER received optimizer job:', optimizerJobId);
-    if (slateDate) console.log('  Slate date:', slateDate);
-    if (actualCsv && actualCsv.length > 0) {
-      console.log('  Actual CSV length:', actualCsv.length);
-    }
+    // In the future we can also accept:
+    // - body.actual_results_csv
+    // - body.winning_lineup_csv
+    // and compute real MAE/RMSE, etc.
 
-    // Dummy “learning” result – just echo current & suggested weights.
-    const currentWeights = {
-      W_SALARY_PROXY: 0.35,
-      W_MATCHUP: 0.25,
-      W_PACE: 0.15,
-      W_REST: 0.10,
-      W_OPPORTUNITY: 0.10,
-      W_SENTIMENT: 0.05,
+    // For now, create a simple record of this slate
+    const record = {
+      optimizer_job_id,
+      slate_date,
+      created_at: new Date().toISOString(),
+      // placeholders for future learning metrics
+      avg_projection_error: null,
+      slate_score: null,
+      winning_score: null,
     };
 
-    const suggestedWeights = {
-      W_SALARY_PROXY: 0.32,
-      W_MATCHUP: 0.27,
-      W_PACE: 0.18,
-      W_REST: 0.12,
-      W_OPPORTUNITY: 0.08,
-      W_SENTIMENT: 0.03,
-    };
+    trackedSlates.push(record);
 
+    // Respond with something the dashboard/learner can use
     return res.status(200).json({
       ok: true,
-      message: 'Learning run completed (stubbed)',
-      optimizer_job_id: optimizerJobId,
-      slate_date: slateDate,
-      current_weights: currentWeights,
-      suggested_weights: suggestedWeights,
-      metrics: {
-        avg_mae: 5.2,
-        avg_rmse: 7.1,
-        samples: 15,
-      },
+      message: "Tracker received optimizer job",
+      record,
+      total_tracked_slates: trackedSlates.length,
     });
   } catch (err) {
-    console.error('TRACKER error:', err);
+    console.error("TRACKER error:", err);
     return res.status(500).json({
       ok: false,
-      error: err.message || 'Internal server error in /api/tracker',
+      error: "Unknown error",
+      details: err.message,
     });
   }
 };
