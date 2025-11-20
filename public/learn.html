@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DFS Learner – Weight Tuning</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      padding-top: 100px;
+    }
+    .nav {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      padding: 15px 30px;
+      border-radius: 50px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      z-index: 1000;
+      display: flex;
+      gap: 20px;
+    }
+    .nav a {
+      text-decoration: none;
+      padding: 10px 20px;
+      border-radius: 25px;
+      font-weight: 600;
+      color: #666;
+      transition: all 0.3s;
+    }
+    .nav a.active {
+      background: #667eea;
+      color: white;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    h1 { color: #333; margin-bottom: 10px; }
+    .subtitle { color: #666; margin-bottom: 25px; }
+
+    .section {
+      margin-bottom: 25px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #eee;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #555;
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+
+    .small-btn {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+
+    .inline-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .inline-row > div {
+      flex: 1;
+    }
+
+    .table-wrapper {
+      margin-top: 15px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #eee;
+    }
+
+    th {
+      background: #f5f5ff;
+      text-align: left;
+      font-weight: 600;
+      color: #555;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .result-box {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #f8f9fa;
+      border-left: 4px solid #667eea;
+      font-size: 13px;
+    }
+
+    .result-box h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .weights-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .weight-card {
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      padding: 8px 10px;
+    }
+
+    .weight-key {
+      font-size: 11px;
+      color: #777;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .weight-val {
+      font-size: 16px;
+      color: #667eea;
+      font-weight: 700;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .badge-info {
+      background: #e3f2fd;
+      color: #1e88e5;
+    }
+    .badge-success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .badge-warn {
+      background: #fff8e1;
+      color: #f9a825;
+    }
+
+    .text-muted {
+      font-size: 12px;
+      color: #777;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 3px solid #eee;
+      border-top-color: #667eea;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/" >🏀 NBA</a>
+    <a href="/nfl.html">🏈 NFL</a>
+    <a href="/dashboard.html">📊 Dashboard</a>
+    <a href="/learn.html" class="active">🧠 Learner</a>
+  </div>
+
+  <div class="container">
+    <h1>🧠 DFS Learner</h1>
+    <p class="subtitle">
+      Paste an Optimizer job ID, enter actual scores, and get updated projection weights.
+    </p>
+
+    <!-- Section 1: Load lineup from job id -->
+    <div class="section">
+      <label for="jobId">Optimizer Job ID</label>
+      <div class="inline-row">
+        <div>
+          <input type="text" id="jobId" placeholder="e.g. 1f74aaa3-354f-42b5-b3a3-0b689bb8cab3">
+          <div class="text-muted">You can copy this from the SwarmNode Optimizer job you used for the slate.</div>
+        </div>
+        <div style="flex: 0 0 auto;">
+          <button id="loadLineupBtn" class="small-btn">📡 Load Lineup</button>
+        </div>
+      </div>
+      <div id="loadStatus" class="text-muted" style="margin-top: 5px;"></div>
+    </div>
+
+    <!-- Section 2: Lineup + actual scores -->
+    <div class="section" id="lineupSection" style="display:none;">
+      <div class="inline-row" style="margin-bottom: 10px;">
+        <h3>Your Lineup & Actual Scores</h3>
+        <span class="badge badge-info">Step 2</span>
+      </div>
+      <div class="text-muted">
+        Enter the actual fantasy points each player scored for this contest.
+      </div>
+
+      <div class="table-wrapper">
+        <table id="lineupTable">
+          <thead>
+            <tr>
+              <th>Slot</th>
+              <th>Player</th>
+              <th>Team</th>
+              <th>Salary</th>
+              <th>Projection</th>
+              <th>Actual FP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- rows injected by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 3: Winning lineup info -->
+    <div class="section" id="winningSection" style="display:none;">
+      <div class="inline-row" style="margin-bottom: 10px;">
+        <h3>Winning Lineup Info (Optional)</h3>
+        <span class="badge badge-info">Step 3</span>
+      </div>
+
+      <div class="inline-row">
+        <div>
+          <label for="winningTotal">Winning Total Fantasy Points</label>
+          <input type="number" id="winningTotal" step="0.1" placeholder="e.g. 312.75">
+        </div>
+        <div>
+          <label for="yourTotal">Your Lineup Total (optional)</label>
+          <input type="number" id="yourTotal" step="0.1" placeholder="We can auto-derive later">
+        </div>
+      </div>
+
+      <label for="winningNotes">Winning Lineup Notes (optional)</label>
+      <textarea id="winningNotes" placeholder="e.g. Used 3 DET players, stacked ATL/BOS game, etc."></textarea>
+    </div>
+
+    <!-- Section 4: Send to learner -->
+    <div class="section" id="learnSection" style="display:none;">
+      <div class="inline-row" style="margin-bottom: 10px;">
+        <h3>Run Learner</h3>
+        <span class="badge badge-info">Step 4</span>
+      </div>
+      <div class="text-muted" style="margin-bottom: 10px;">
+        This will send your lineup + actual scores (and winning info if provided) to the Learner agent to suggest new weights.
+      </div>
+      <button id="runLearnerBtn">🧠 Update Weights</button>
+      <div id="learnStatus" class="text-muted" style="margin-top: 5px;"></div>
+    </div>
+
+    <!-- Section 5: Results -->
+    <div id="learnerResult" class="result-box" style="display:none;">
+      <h3>📈 Suggested Weight Updates</h3>
+      <div id="learnerSummary" class="text-muted"></div>
+
+      <div style="margin-top: 10px;">
+        <strong>Current Weights</strong>
+        <div id="currentWeights" class="weights-grid"></div>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <strong>Suggested Weights</strong>
+        <div id="suggestedWeights" class="weights-grid"></div>
+      </div>
+
+      <div id="learnerRecommendation" style="margin-top: 10px;" class="text-muted"></div>
+    </div>
+  </div>
+
+  <script>
+    const loadLineupBtn = document.getElementById('loadLineupBtn');
+    const jobIdInput = document.getElementById('jobId');
+    const loadStatus = document.getElementById('loadStatus');
+    const lineupSection = document.getElementById('lineupSection');
+    const lineupTableBody = document.querySelector('#lineupTable tbody');
+
+    const winningSection = document.getElementById('winningSection');
+    const winningTotalInput = document.getElementById('winningTotal');
+    const yourTotalInput = document.getElementById('yourTotal');
+    const winningNotesInput = document.getElementById('winningNotes');
+
+    const learnSection = document.getElementById('learnSection');
+    const runLearnerBtn = document.getElementById('runLearnerBtn');
+    const learnStatus = document.getElementById('learnStatus');
+    const learnerResult = document.getElementById('learnerResult');
+    const learnerSummary = document.getElementById('learnerSummary');
+    const currentWeightsDiv = document.getElementById('currentWeights');
+    const suggestedWeightsDiv = document.getElementById('suggestedWeights');
+    const learnerRecommendation = document.getElementById('learnerRecommendation');
+
+    let loadedLineup = null;
+    let loadedJobId = null;
+
+    loadLineupBtn.addEventListener('click', async () => {
+      const jobId = jobIdInput.value.trim();
+      if (!jobId) {
+        loadStatus.textContent = 'Please enter a job ID.';
+        return;
+      }
+
+      loadLineupBtn.disabled = true;
+      loadStatus.innerHTML = 'Loading lineup from SwarmNode… <span class="spinner"></span>';
+      lineupSection.style.display = 'none';
+      winningSection.style.display = 'none';
+      learnSection.style.display = 'none';
+      learnerResult.style.display = 'none';
+      lineupTableBody.innerHTML = '';
+
+      try {
+        const resp = await fetch(`/api/fetch-lineup?job_id=${encodeURIComponent(jobId)}`);
+        const data = await resp.json();
+        console.log('fetch-lineup response:', data);
+
+        if (!data.ok) {
+          loadStatus.textContent = data.error || 'Failed to load lineup.';
+          loadLineupBtn.disabled = false;
+          return;
+        }
+
+        if (data.status !== 'completed' && data.status !== 'success') {
+          loadStatus.textContent = `Job status: ${data.status}. Try again when optimizer job is completed.`;
+          loadLineupBtn.disabled = false;
+          return;
+        }
+
+        const lineup = data.lineup || [];
+        if (!Array.isArray(lineup) || lineup.length === 0) {
+          loadStatus.textContent = 'No lineup found in optimizer return_value.';
+          loadLineupBtn.disabled = false;
+          return;
+        }
+
+        loadedLineup = lineup;
+        loadedJobId = data.job_id;
+
+        // Render table
+        lineupTableBody.innerHTML = '';
+        lineup.forEach((p, idx) => {
+          const tr = document.createElement('tr');
+
+          const tdSlot = document.createElement('td');
+          tdSlot.textContent = p.slot || '';
+          tr.appendChild(tdSlot);
+
+          const tdName = document.createElement('td');
+          tdName.textContent = p.name || '';
+          tr.appendChild(tdName);
+
+          const tdTeam = document.createElement('td');
+          tdTeam.textContent = p.team || '';
+          tr.appendChild(tdTeam);
+
+          const tdSalary = document.createElement('td');
+          tdSalary.textContent = p.salary || (p.salary_num ? `$${p.salary_num}` : '');
+          tr.appendChild(tdSalary);
+
+          const tdProj = document.createElement('td');
+          tdProj.textContent = typeof p.projection === 'number' ? p.projection.toFixed(1) : '';
+          tr.appendChild(tdProj);
+
+          const tdActual = document.createElement('td');
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.step = '0.1';
+          input.placeholder = 'Actual FP';
+          input.dataset.index = idx;
+          tdActual.appendChild(input);
+          tr.appendChild(tdActual);
+
+          lineupTableBody.appendChild(tr);
+        });
+
+        loadStatus.textContent = `Loaded lineup from job ${data.job_id}`;
+        lineupSection.style.display = 'block';
+        winningSection.style.display = 'block';
+        learnSection.style.display = 'block';
+        loadLineupBtn.disabled = false;
+
+      } catch (err) {
+        console.error('loadLineup error:', err);
+        loadStatus.textContent = `Error: ${err.message}`;
+        loadLineupBtn.disabled = false;
+      }
+    });
+
+    runLearnerBtn.addEventListener('click', async () => {
+      if (!loadedLineup || !loadedJobId) {
+        learnStatus.textContent = 'Load a lineup first.';
+        return;
+      }
+
+      // Combine lineup + actual FP
+      const inputs = lineupTableBody.querySelectorAll('input[type="number"]');
+      const lineupWithActuals = loadedLineup.map((p, idx) => {
+        const input = Array.from(inputs).find(i => parseInt(i.dataset.index, 10) === idx);
+        const actual = input && input.value !== '' ? parseFloat(input.value) : null;
+        return {
+          ...p,
+          actual_fp: actual
+        };
+      });
+
+      // Build feedback payload
+      const payload = {
+        job_id: loadedJobId,
+        lineup: lineupWithActuals,
+        winning_total: winningTotalInput.value ? parseFloat(winningTotalInput.value) : null,
+        your_total: yourTotalInput.value ? parseFloat(yourTotalInput.value) : null,
+        winning_notes: winningNotesInput.value || ''
+      };
+
+      runLearnerBtn.disabled = true;
+      learnStatus.innerHTML = 'Sending to Learner… <span class="spinner"></span>';
+      learnerResult.style.display = 'none';
+
+      try {
+        const resp = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+        console.log('feedback response:', data);
+
+        if (!data.ok) {
+          learnStatus.textContent = data.error || 'Learner failed.';
+          runLearnerBtn.disabled = false;
+          return;
+        }
+
+        if (data.status === 'processing') {
+          learnStatus.textContent = 'Learner job started – check SwarmNode for full details.';
+          runLearnerBtn.disabled = false;
+          return;
+        }
+
+        const rv = data.learner_return_value || {};
+        const current = rv.current_weights || rv.current_weights || rv.weights_before || {};
+        const suggested = rv.suggested_weights || rv.new_weights || {};
+        const improvement = rv.estimated_improvement || rv.improvement || null;
+
+        learnerSummary.textContent = improvement
+          ? `Estimated improvement: ${improvement}`
+          : 'Learner produced updated weights.';
+
+        // Render weights
+        currentWeightsDiv.innerHTML = '';
+        Object.entries(current).forEach(([k, v]) => {
+          const card = document.createElement('div');
+          card.className = 'weight-card';
+          card.innerHTML = `
+            <div class="weight-key">${k}</div>
+            <div class="weight-val">${(v * 100).toFixed(1)}%</div>
+          `;
+          currentWeightsDiv.appendChild(card);
+        });
+
+        suggestedWeightsDiv.innerHTML = '';
+        Object.entries(suggested).forEach(([k, v]) => {
+          const card = document.createElement('div');
+          card.className = 'weight-card';
+          card.innerHTML = `
+            <div class="weight-key">${k}</div>
+            <div class="weight-val">${(v * 100).toFixed(1)}%</div>
+          `;
+          suggestedWeightsDiv.appendChild(card);
+        });
+
+        learnerRecommendation.textContent =
+          rv.recommendation ||
+          rv.message ||
+          'You can copy these suggested weights into your PROJECTIONS agent.';
+
+        learnerResult.style.display = 'block';
+        learnStatus.textContent = 'Learner complete.';
+        runLearnerBtn.disabled = false;
+
+      } catch (err) {
+        console.error('runLearner error:', err);
+        learnStatus.textContent = `Error: ${err.message}`;
+        runLearnerBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
