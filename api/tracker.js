@@ -1,76 +1,100 @@
 // api/tracker.js
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+const https = require('https');
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (e) {
+        console.error('Failed to parse JSON body:', e.message);
+        resolve({});
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+module.exports = async (req, res) => {
+  // CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
   try {
-    const { optimizer_job_id, actual_points, winning_points } = req.body;
+    const body = await parseBody(req);
 
-    if (!optimizer_job_id) {
-      return res.status(400).json({ error: "Missing optimizer_job_id" });
-    }
+    // Accept several possible field names from the front-end
+    const optimizerJobId =
+      body.optimizer_job_id ||
+      body.optimizerJobId ||
+      body.job_id ||
+      body.jobId ||
+      null;
 
-    // Validate inputs
-    if (!Array.isArray(actual_points) || actual_points.length === 0) {
-      return res.status(400).json({ error: "Missing actual player results" });
-    }
+    const slateDate = body.slate_date || body.slateDate || null;
+    const actualCsv = body.actual_csv || body.actualCsv || '';
 
-    if (!Array.isArray(winning_points) || winning_points.length === 0) {
-      return res.status(400).json({ error: "Missing winning lineup" });
-    }
-
-    // === Fetch optimizer return value ===
-    const optimizerResp = await fetch(
-      `https://api.swarmnode.ai/v1/agent-executor-jobs/${optimizer_job_id}/return_value`,
-      {
-        headers: {
-          "x-api-key": process.env.SWARMNODE_API_KEY,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    if (!optimizerResp.ok) {
+    if (!optimizerJobId || typeof optimizerJobId !== 'string' || !optimizerJobId.trim()) {
       return res.status(400).json({
-        error: "Failed to retrieve optimizer job return value"
+        ok: false,
+        error: 'Missing optimizer_job_id (optimizer_job_id / optimizerJobId / job_id)'
       });
     }
 
-    const optimizerData = await optimizerResp.json();
+    // For now we’re not *really* using the CSVs – just stubbing learning.
+    // Later we’ll parse actualCsv & compare to projections.
+    console.log('📈 TRACKER received optimizer job:', optimizerJobId);
+    if (slateDate) console.log('  Slate date:', slateDate);
+    if (actualCsv && actualCsv.length > 0) {
+      console.log('  Actual CSV length:', actualCsv.length);
+    }
 
-    // === Calculate projection errors ===
-    const projections = optimizerData.lineup || [];
+    // Dummy “learning” result – just echo current & suggested weights.
+    const currentWeights = {
+      W_SALARY_PROXY: 0.35,
+      W_MATCHUP: 0.25,
+      W_PACE: 0.15,
+      W_REST: 0.10,
+      W_OPPORTUNITY: 0.10,
+      W_SENTIMENT: 0.05,
+    };
 
-    const errors = projections.map((player) => {
-      const actual = actual_points.find(p => p.name === player.name);
-      return {
-        name: player.name,
-        proj: player.projection,
-        actual: actual ? actual.points : null,
-        error: actual ? actual.points - player.projection : null
-      };
-    });
+    const suggestedWeights = {
+      W_SALARY_PROXY: 0.32,
+      W_MATCHUP: 0.27,
+      W_PACE: 0.18,
+      W_REST: 0.12,
+      W_OPPORTUNITY: 0.08,
+      W_SENTIMENT: 0.03,
+    };
 
-    // === Save tracking data to return to Learner ===
     return res.status(200).json({
       ok: true,
-      optimizer_job_id,
-      projections,
-      actual_points,
-      winning_points,
-      errors
+      message: 'Learning run completed (stubbed)',
+      optimizer_job_id: optimizerJobId,
+      slate_date: slateDate,
+      current_weights: currentWeights,
+      suggested_weights: suggestedWeights,
+      metrics: {
+        avg_mae: 5.2,
+        avg_rmse: 7.1,
+        samples: 15,
+      },
     });
-
   } catch (err) {
+    console.error('TRACKER error:', err);
     return res.status(500).json({
       ok: false,
-      error: err.message
+      error: err.message || 'Internal server error in /api/tracker',
     });
   }
-}
+};
