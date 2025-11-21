@@ -1,133 +1,112 @@
 // api/optimize.js
-const https = require('https');
 
-const SWARMNODE_BASE = process.env.SWARMNODE_BASE || 'https://api.swarmnode.ai';
-const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY || '';
-// Ingest agent that kicks off the whole pipeline (INGEST → SIGNALS → PROJECTIONS → OPTIMIZER)
-const INGEST_AGENT_ID =
-  process.env.INGEST_AGENT_ID || 'YOUR_INGEST_AGENT_ID_HERE';
-
-function makeRequest(url, options) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const reqOptions = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + (urlObj.search || ''),
-      method: options.method || 'POST',
-      headers: options.headers || {},
-    };
-
-    const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, body: data });
-      });
-    });
-
-    req.on('error', reject);
-
-    if (options.body) {
-      req.write(options.body);
-    }
-    req.end();
-  });
-}
+const SWARMNODE_BASE = process.env.SWARMNODE_BASE || "https://api.swarmnode.ai";
+const SWARMNODE_API_KEY = process.env.SWARMNODE_API_KEY;
+const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID; // your INGEST agent ID
 
 module.exports = async (req, res) => {
   // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST')
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed" });
+  }
+
+  if (!SWARMNODE_API_KEY || !INGEST_AGENT_ID) {
+    console.error("❌ Missing SWARMNODE_API_KEY or INGEST_AGENT_ID");
+    return res.status(500).json({
+      success: false,
+      error: "Server misconfiguration: missing SwarmNode env vars",
+    });
+  }
 
   try {
-    if (!SWARMNODE_KEY) {
-      return res
-        .status(500)
-        .json({ success: false, error: 'SWARMNODE_API_KEY not configured' });
-    }
-    if (!INGEST_AGENT_ID) {
-      return res
-        .status(500)
-        .json({ success: false, error: 'INGEST_AGENT_ID not configured' });
-    }
+    const body = req.body || {};
+    const { csv, sport = "nba", locked_player = null, exclude_players = [] } = body;
 
-    // Parse request body (handles object or string)
-    let body = req.body;
-    if (typeof body === 'string') {
-      try {
-        body = JSON.parse(body || '{}');
-      } catch (e) {
-        body = {};
-      }
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({
+        success: false,
+        error: "Missing or invalid csv in request body",
+      });
     }
-
-    const { csv, sport = 'nba', locked_player } = body || {};
-    if (!csv) {
-      return res
-        .status(400)
-        .json({ success: false, error: 'Missing CSV content' });
-    }
-
-    console.log('📤 Creating INGEST job for sport:', sport);
 
     const payload = {
       csv,
       sport,
+      locked_player,
+      exclude_players,
     };
 
-    if (locked_player && locked_player.last_name) {
-      payload.locked_player = locked_player;
-    }
+    const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/`;
 
-    const url = `${SWARMNODE_BASE}/v1/agents/${INGEST_AGENT_ID}/jobs/`;
-
-    const response = await makeRequest(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${SWARMNODE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ payload }),
+    console.log("🧠 OPTIMIZE → Creating INGEST job", {
+      url,
+      agent_id: INGEST_AGENT_ID,
+      sport,
+      has_locked_player: !!locked_player,
+      exclude_count: exclude_players.length,
     });
 
-    console.log('INGEST job response status:', response.statusCode);
+    const snResponse = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${SWARMNODE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent_id: INGEST_AGENT_ID,
+        payload,
+      }),
+    });
 
-    if (response.statusCode !== 201 && response.statusCode !== 200) {
-      console.error('Failed to create ingest job:', response.body);
+    const text = await snResponse.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (e) {
+      console.error("❌ OPTIMIZE: Failed to parse SwarmNode JSON:", e.message);
+    }
+
+    console.log("✅ OPTIMIZE: SwarmNode status:", snResponse.status);
+
+    if (!snResponse.ok) {
+      console.error("❌ OPTIMIZE: SwarmNode error body:", text);
       return res.status(500).json({
         success: false,
-        error: 'Failed to create ingest job on SwarmNode',
+        error: "Failed to create optimization job on SwarmNode",
+        status: snResponse.status,
       });
     }
 
-    let data;
-    try {
-      data = JSON.parse(response.body);
-    } catch (e) {
-      console.error('Failed to parse ingest response:', e.message);
-      return res
-        .status(500)
-        .json({ success: false, error: 'Invalid response from SwarmNode' });
+    const jobId = data?.id || data?.job_id;
+    if (!jobId) {
+      console.error("❌ OPTIMIZE: No job_id in SwarmNode response:", data);
+      return res.status(500).json({
+        success: false,
+        error: "No job_id returned from SwarmNode",
+      });
     }
 
-    const jobId = data.id;
-    console.log('✅ Created INGEST job:', jobId);
+    console.log("🎯 OPTIMIZE: Created job", jobId);
 
-    // This is the ID you later paste into “Learn from Results”
     return res.status(200).json({
       success: true,
       job_id: jobId,
-      message: 'Optimization pipeline started',
+      message: "Optimization job created successfully",
     });
-  } catch (error) {
-    console.error('❌ Optimize error:', error);
-    return res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    console.error("❌ OPTIMIZE: Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Unknown error",
+    });
   }
 };
