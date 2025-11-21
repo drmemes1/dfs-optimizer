@@ -1,117 +1,71 @@
-// api/tracker.js
-const https = require('https');
-
-function fetchJson(url, apiKey) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-
-    const options = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, body: data });
-      });
-    });
-
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-module.exports = async (req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+export default async function handler(req, res) {
   try {
-    // Vercel sometimes passes parsed JSON, sometimes string
-    const body =
-      typeof req.body === 'string'
-        ? JSON.parse(req.body || '{}')
-        : (req.body || {});
+    console.log("📩 TRACKER received raw body:", req.body);
 
-    console.log('📩 TRACKER raw body:', body);
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
 
-    const { optimizer_job_id, slate_date } = body;
+    const { optimizer_job_id, slate_date } = req.body || {};
 
     if (!optimizer_job_id) {
-      return res
-        .status(400)
-        .json({ error: 'Missing optimizer_job_id' });
+      console.log("❌ Missing optimizer_job_id");
+      return res.status(400).json({ error: "Missing optimizer_job_id" });
     }
 
-    console.log('📌 Parsed optimizerJobId:', optimizer_job_id);
+    console.log("📌 Parsed optimizerJobId:", optimizer_job_id);
 
+    // =============== USE **CORRECT** SWARMNODE ENDPOINT ==================
+    const agentId = process.env.OPTIMIZER_AGENT_ID;
     const apiKey = process.env.SWARMNODE_API_KEY;
-    if (!apiKey) {
-      return res
-        .status(500)
-        .json({ error: 'Missing SWARMNODE_API_KEY env var' });
-    }
 
-    // --- STEP 1: fetch that executor job from SwarmNode ---
-    const jobUrl = `https://api.swarmnode.ai/v1/agent-executor-jobs/${optimizer_job_id}`;
-    console.log('🔍 Fetching optimizer job from:', jobUrl);
+    const url = `https://api.swarmnode.ai/v1/agents/${agentId}/jobs/${optimizer_job_id}`;
 
-    const jobResp = await fetchJson(jobUrl, apiKey);
-    console.log('🔍 Job response status:', jobResp.statusCode);
+    console.log("🔍 Fetching optimizer job from:", url);
 
-    if (jobResp.statusCode !== 200) {
-      console.error('❌ Failed to fetch optimizer job:', jobResp.body);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    console.log("🔍 Job response status:", response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Failed to fetch optimizer job:", errorText);
       return res.status(500).json({
-        error: 'Failed to fetch optimizer job from SwarmNode',
-        details: jobResp.body
+        error: "Failed to fetch optimizer job",
+        details: errorText
       });
     }
 
-    const jobData = JSON.parse(jobResp.body);
-    console.log('📦 Job data:', jobData);
+    const jobData = await response.json();
+    console.log("📦 Job data:", jobData);
 
-    const returnValue = jobData.return_value;
-    if (!returnValue) {
-      return res.status(400).json({
-        error: 'Optimizer job exists but has no return_value yet'
+    // Extract lineup from return_value
+    const lineup = jobData?.return_value?.lineup || null;
+
+    if (!lineup) {
+      console.log("❌ No lineup found in job return_value");
+      return res.status(404).json({
+        error: "No lineup found in optimizer job"
       });
     }
 
-    // In your optimizer, return_value already looks like:
-    // { lineup, stats, recommendations, ... }
-    const lineup = returnValue.lineup || null;
-    const stats = returnValue.stats || null;
-    const recommendations = returnValue.recommendations || null;
-
-    console.log('✅ Extracted lineup from return_value');
+    console.log("🏀 Parsed lineup:", lineup);
 
     return res.status(200).json({
       ok: true,
       optimizer_job_id,
       slate_date,
-      lineup,
-      stats,
-      recommendations,
-      raw_return_value: returnValue
+      lineup
     });
+
   } catch (err) {
-    console.error('❌ TRACKER error:', err);
-    return res.status(500).json({
-      error: 'Internal server error',
-      details: err.message
-    });
+    console.error("🔥 TRACKER error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
-};
+}
