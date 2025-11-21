@@ -126,14 +126,29 @@ module.exports = async (req, res) => {
     // Call SwarmNode
     const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
     
-    const payload = {
-      agent_id: INGEST_AGENT_ID,
-      payload: {
-        csv: csvText,
-        sport: sport,
-        locked_player: lockedPlayer
-      }
-    };
+// Support multiple exclude players (comma-separated string from UI)
+let excludePlayers = null;
+
+if (body.exclude_players) {
+  if (Array.isArray(body.exclude_players)) {
+    excludePlayers = body.exclude_players;
+  } else if (typeof body.exclude_players === "string") {
+    excludePlayers = body.exclude_players
+      .split(",")
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+  }
+}
+
+const payload = {
+  agent_id: INGEST_AGENT_ID,
+  payload: {
+    csv: csvText,
+    sport: sport,
+    locked_player: lockedPlayer || null,
+    exclude_players: excludePlayers || null
+  }
+};
 
     const postData = JSON.stringify(payload);
     console.log('SwarmNode URL:', url);
