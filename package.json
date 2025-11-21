@@ -1,5 +1,9 @@
 {
   "name": "dfs-optimizer",
   "version": "1.0.0",
-  "description": "DFS Lineup Optimizer"
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
 }
