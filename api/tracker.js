@@ -6,7 +6,7 @@ const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY || '';
 const OPTIMIZER_AGENT_ID =
   process.env.OPTIMIZER_AGENT_ID || '6734a0b0-0555-4975-a1c9-4757ac1d39b3';
 
-// These should match your PROJECTIONS weights
+// These should mirror your PROJECTIONS weights
 const CURRENT_WEIGHTS = {
   W_SALARY_PROXY: 0.35,
   W_MATCHUP: 0.25,
@@ -55,7 +55,7 @@ module.exports = async (req, res) => {
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
-    // --- Parse body safely (handles string or object, camelCase or snake_case) ---
+    // ---- Parse body (string or object) ----
     let rawBody = req.body;
     let body = {};
 
@@ -69,18 +69,19 @@ module.exports = async (req, res) => {
       body = rawBody;
     }
 
+    // Accept both snake_case and camelCase to be safe
     const optimizerJobId =
       (body.optimizer_job_id || body.optimizerJobId || '').trim();
     const slateDate = body.slate_date || body.slateDate || null;
 
-    console.log('📥 TRACKER payload body:', body);
+    console.log('📥 TRACKER raw body:', rawBody);
+    console.log('📥 TRACKER parsed body:', body);
     console.log('📌 Parsed optimizerJobId:', optimizerJobId);
 
     if (!optimizerJobId) {
       return res.status(400).json({
         ok: false,
         error: 'Missing optimizer_job_id',
-        debug: body, // helpful while you’re debugging
       });
     }
 
@@ -90,9 +91,8 @@ module.exports = async (req, res) => {
         .json({ ok: false, error: 'SWARMNODE_API_KEY not configured' });
     }
 
-    // --- Step 1: fetch this specific OPTIMIZER job from SwarmNode ---
-    // We use the agent-specific job endpoint:
-    //   GET /v1/agents/{agent_id}/jobs/{job_id}/
+    // ---- Step 1: Fetch that specific OPTIMIZER job ----
+    // Endpoint: GET /v1/agents/{agent_id}/jobs/{job_id}/
     const jobUrl = `${SWARMNODE_BASE}/v1/agents/${OPTIMIZER_AGENT_ID}/jobs/${optimizerJobId}/`;
     console.log('Step 1: Fetching optimizer job from:', jobUrl);
 
@@ -132,7 +132,7 @@ module.exports = async (req, res) => {
       has_return_value: !!jobData.return_value,
     });
 
-    // The optimizer returns the lineup in either jobData.output or jobData.return_value
+    // Optimizer usually returns the lineup in output or return_value
     const rawOutput = jobData.output || jobData.return_value || {};
     const lineup = rawOutput.lineup || [];
     const stats = rawOutput.stats || {};
@@ -147,10 +147,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    // --- This is where we *will* compare projected vs actual later ---
-    // For now, just return the lineup & current weights so the UI can:
-    //   1. Show the projected lineup
-    //   2. Let you type in actual scores + winning lineup
+    // For now just return lineup + weights.
+    // Later we’ll POST actual scores + winning lineup back into a learner endpoint.
     return res.status(200).json({
       ok: true,
       optimizer_job_id: optimizerJobId,
@@ -160,7 +158,6 @@ module.exports = async (req, res) => {
       recommendations,
       lineup_export: lineupExport,
       current_weights: CURRENT_WEIGHTS,
-      // placeholders for when you send back actuals later
       learning_summary: {
         message:
           'Lineup and projections loaded. Enter actual scores & winning lineup in the UI to compute new weights.',
