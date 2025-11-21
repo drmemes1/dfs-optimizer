@@ -5,57 +5,66 @@ module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-
-  const API_KEY = process.env.SWARMNODE_API_KEY;
-  const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID;
-
-  if (!API_KEY || !INGEST_AGENT_ID) {
-    return res.status(500).json({ ok: false, error: "Missing API KEY or AGENT ID" });
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
   }
 
   try {
-    console.log("🧠 OPTIMIZE → Creating job", {
-      agent: INGEST_AGENT_ID,
-      sport: req.body.sport,
-      lock_player: req.body.lock_player,
-      exclude_player: req.body.exclude_player
+    const { csv_url, sport, lock_player, exclude_player } = req.body || {};
+
+    console.log("🧠 OPTIMIZE → Creating SwarmNode execution job", {
+      agent: process.env.INGEST_AGENT_ID,
+      csv_url
     });
 
     const response = await fetch(
-      `https://api.swarmnode.ai/v1/agents/${INGEST_AGENT_ID}/execute/`,
+      "https://api.swarmnode.ai/v1/agent-executor-jobs/",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${API_KEY}`
+          Authorization: `Bearer ${process.env.SWARMNODE_API_KEY}`,
         },
         body: JSON.stringify({
+          agent_id: process.env.INGEST_AGENT_ID,
           payload: {
-            sport: req.body.sport || "nba",
-            lock_player: req.body.lock_player || null,
-            exclude_player: req.body.exclude_player || null
+            csv_url,
+            sport,
+            lock_player: lock_player || null,
+            exclude_player: exclude_player || null
           }
-        })
+        }),
       }
     );
 
-    const data = await response.json();
-    console.log("OPTIMIZE: SwarmNode status:", response.status);
+    const text = await response.text();
+
+    console.log("SwarmNode Raw Response:", text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.error("❌ JSON Parse Error — Raw response was HTML:");
+      return res.status(500).json({
+        ok: false,
+        error: "Invalid JSON — SwarmNode returned HTML instead of JSON",
+        raw: text,
+      });
+    }
 
     if (!response.ok) {
-      console.error("❌ SwarmNode error:", data);
+      console.error("❌ SwarmNode ERROR:", data);
       return res.status(500).json({ ok: false, error: data });
     }
 
     return res.status(200).json({
       ok: true,
-      executor_job_id: data.executor_job_id, // THIS matters
-      swarm_response: data
+      ingest_job_id: data.id,
+      swarm_response: data,
     });
-
   } catch (err) {
-    console.error("❌ OPTIMIZE error:", err);
-    return res.status(500).json({ ok: false, error: err.toString() });
+    console.error("❌ OPTIMIZE unexpected error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 };
