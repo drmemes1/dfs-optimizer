@@ -1,4 +1,4 @@
-// api/results.js - WITH INITIAL DELAY
+// api/results.js - WITH 20-SECOND INITIAL DELAY
 const https = require("https");
 
 function makeRequest(url, options) {
@@ -66,13 +66,13 @@ module.exports = async (req, res) => {
     console.log("=".repeat(60));
 
     // ========================================================================
-    // NEW: Check if this is the first poll (within 15 seconds of job start)
+    // Wait 20 seconds on first poll for optimizer to start
     // ========================================================================
     const skipDelay = req.query?.skip_delay === "true";
     
     if (!skipDelay) {
       console.log("\n⏳ Waiting 20 seconds for optimizer to start...");
-      await sleep(10000);
+      await sleep(20000);
       console.log("✅ Wait complete, fetching results...\n");
     } else {
       console.log("\n⚡ Skipping initial delay (subsequent poll)\n");
