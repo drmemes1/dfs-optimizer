@@ -89,14 +89,25 @@ module.exports = async (req, res) => {
       body.lockPlayers ||
       body.lock_player ||
       "";
+    
+const normalizeName = (name) =>
+      typeof name === "string"
+        ? name
+            .replace(/\s+/g, " ")
+            .replace(/\s+,/g, ",")
+            .trim()
+        : "";
 
     let lockedName = null;
     if (!lockedPlayer) {
       if (typeof lockRaw === "string" && lockRaw.trim()) {
         // Take first name if multiple comma-separated
-        lockedName = lockRaw.split(",")[0].trim();
+       lockedName = normalizeName(lockRaw.split(",")[0]);
       } else if (lockRaw && typeof lockRaw === "object") {
-        lockedName = lockRaw.full_name || lockRaw.name || lockRaw.last_name || null;
+        lockedName =
+          normalizeName(
+            lockRaw.full_name || lockRaw.name || lockRaw.last_name || ""
+          ) || null;
       }
 
       if (lockedName) {
@@ -151,10 +162,14 @@ module.exports = async (req, res) => {
       ...parseNameList(metadataExclude),
     ];
 
-    // Deduplicate while preserving order
-    excludedPlayers = excludedPlayers.filter(
-      (name, idx) => excludedPlayers.indexOf(name) === idx
-    );
+    // Deduplicate case-insensitively while preserving first appearance
+    const seen = new Set();
+    excludedPlayers = excludedPlayers.filter((name) => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     console.log("Exclude raw:", excludeRaw);
     console.log("Excluded players list:", excludedPlayers);
