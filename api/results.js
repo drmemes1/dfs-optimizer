@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
   try {
     const KEY = process.env.SWARMNODE_API_KEY;
     const AGENT_ID = process.env.OPTIMIZER_AGENT_ID;
-    const BASE = "https://api.swarmnode.ai";
+    const BASE = (process.env.SWARMNODE_BASE || "https://api.swarmnode.ai").replace(/\/+$/, "");
 
     if (!KEY || !AGENT_ID) {
       return res.status(500).json({
