@@ -71,7 +71,7 @@ module.exports = async (req, res) => {
     const skipDelay = req.query?.skip_delay === "true";
     
     if (!skipDelay) {
-      console.log("\n⏳ Waiting 10 seconds for optimizer to start...");
+      console.log("\n⏳ Waiting 20 seconds for optimizer to start...");
       await sleep(10000);
       console.log("✅ Wait complete, fetching results...\n");
     } else {
