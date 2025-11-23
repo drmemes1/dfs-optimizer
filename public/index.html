@@ -126,6 +126,10 @@
             border-color: #ffc107;
         }
 
+        .lock-input-group.full-width {
+            grid-column: 1 / -1;
+        }
+
         .lock-info {
             margin-top: 15px;
             padding: 10px;
@@ -313,6 +317,30 @@
             margin-top: 10px;
             text-align: center;
         }
+
+        .preview-box {
+            margin-top: 10px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            font-size: 13px;
+            display: none;
+        }
+
+        .preview-box.active {
+            display: block;
+        }
+
+        .preview-label {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .preview-content {
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -330,11 +358,11 @@
             <h3>🔒 Lock / 🚫 Exclude Players</h3>
             <div class="lock-inputs">
                 <div class="lock-input-group">
-                    <label>Lock Player (Last Name)</label>
+                    <label>Lock Player (Full Name)</label>
                     <input 
                         type="text" 
                         id="lockedPlayerName" 
-                        placeholder="e.g., James"
+                        placeholder="e.g., Stephen Curry"
                         autocomplete="off"
                     />
                 </div>
@@ -348,24 +376,24 @@
                         max="12000"
                     />
                 </div>
-                <div class="lock-input-group">
-                   <label>Exclude Players (Full names, comma-separated)</label>
+                <div class="lock-input-group full-width">
+                    <label>Exclude Players (Full names, comma-separated)</label>
                     <input 
                         type="text" 
                         id="excludedPlayers" 
-                        placeholder="e.g., Curry, Jokic"
+                        placeholder="e.g., LeBron James, Nikola Jokic, Luka Doncic"
                         autocomplete="off"
                     />
                 </div>
-                <div class="lock-input-group">
-                    <!-- spacer -->
-                </div>
             </div>
             <div class="lock-info">
-                💡 <strong>How it works:</strong> Enter a player's last name to guarantee them in your lineup.
-                Use the exclude box to drop players by their full name (e.g., "Stephen Curry").
+                💡 <strong>How it works:</strong> Enter a player's full name (e.g., "Stephen Curry") to guarantee them in your lineup.
+                Use the exclude box to remove multiple players by their full names, separated by commas.
             </div>
-            <div class="locked-player-display" id="lockedPlayerDisplay"></div>
+            <div class="preview-box" id="previewBox">
+                <div class="preview-label">Current Settings:</div>
+                <div class="preview-content" id="previewContent"></div>
+            </div>
         </div>
 
         <div class="upload-area" id="uploadArea">
@@ -386,30 +414,45 @@
         const result = document.getElementById('result');
         const lockedPlayerName = document.getElementById('lockedPlayerName');
         const lockedPlayerSalary = document.getElementById('lockedPlayerSalary');
-        const lockedPlayerDisplay = document.getElementById('lockedPlayerDisplay');
         const excludedPlayersInput = document.getElementById('excludedPlayers');
+        const previewBox = document.getElementById('previewBox');
+        const previewContent = document.getElementById('previewContent');
         
         let selectedFile = null;
         let pollingInterval = null;
         let pollAttempts = 0;
         const MAX_POLL_ATTEMPTS = 60;
 
-        lockedPlayerName.addEventListener('input', updateLockedPlayerDisplay);
-        lockedPlayerSalary.addEventListener('input', updateLockedPlayerDisplay);
+        // Update preview when inputs change
+        lockedPlayerName.addEventListener('input', updatePreview);
+        lockedPlayerSalary.addEventListener('input', updatePreview);
+        excludedPlayersInput.addEventListener('input', updatePreview);
 
-        function updateLockedPlayerDisplay() {
-            const name = lockedPlayerName.value.trim();
-            const salary = lockedPlayerSalary.value.trim();
+        function updatePreview() {
+            const lockName = lockedPlayerName.value.trim();
+            const lockSalary = lockedPlayerSalary.value.trim();
+            const excludeNames = excludedPlayersInput.value.trim();
 
-            if (name) {
-                let text = `🔒 Will lock player with last name: <strong>${name}</strong>`;
-                if (salary) {
-                    text += ` (max salary: $${parseInt(salary).toLocaleString()})`;
+            let previewText = '';
+            
+            if (lockName) {
+                previewText += `🔒 <strong>Locked:</strong> ${lockName}`;
+                if (lockSalary) {
+                    previewText += ` (max $${parseInt(lockSalary).toLocaleString()})`;
                 }
-                lockedPlayerDisplay.innerHTML = text;
-                lockedPlayerDisplay.style.display = 'block';
+            }
+
+            if (excludeNames) {
+                const excludeList = excludeNames.split(',').map(s => s.trim()).filter(Boolean);
+                if (previewText) previewText += '<br>';
+                previewText += `❌ <strong>Excluded:</strong> ${excludeList.join(', ')}`;
+            }
+
+            if (previewText) {
+                previewContent.innerHTML = previewText;
+                previewBox.classList.add('active');
             } else {
-                lockedPlayerDisplay.style.display = 'none';
+                previewBox.classList.remove('active');
             }
         }
 
@@ -518,8 +561,22 @@
             const lineup = data.lineup || [];
             const stats = data.stats || {};
             const recommendations = data.recommendations || [];
+            const lockedPlayer = data.locked_player_used;
+            const excludedPlayers = data.excluded_players || [];
 
             let html = '<h3>✅ Optimal Lineup Generated!</h3>';
+
+            // Show lock/exclude summary
+            if (lockedPlayer || excludedPlayers.length > 0) {
+                html += '<div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 13px;">';
+                if (lockedPlayer) {
+                    html += `<div>🔒 <strong>Locked player:</strong> ${lockedPlayer}</div>`;
+                }
+                if (excludedPlayers.length > 0) {
+                    html += `<div style="margin-top: 5px;">❌ <strong>Excluded:</strong> ${excludedPlayers.join(', ')}</div>`;
+                }
+                html += '</div>';
+            }
 
             html += '<div class="stats-grid">';
             html += `<div class="stat-card">
@@ -589,32 +646,51 @@
             try {
                 const csvText = await selectedFile.text();
 
-                const lockLastName = lockedPlayerName.value.trim();
-                const maxSalary = lockedPlayerSalary.value.trim();
-                const excludedPlayersRaw = excludedPlayersInput.value.trim();
+                // Get input values
+                const lockName = lockedPlayerName.value.trim();
+                const lockSalary = lockedPlayerSalary.value.trim();
+                const excludeRaw = excludedPlayersInput.value.trim();
 
-                const payload = { 
-                    csv: csvText,
-                    sport: 'nba',
-                    metadata: {}
-                };
-
-                if (lockLastName) {
-                    payload.metadata.locked_player = {
-                        last_name: lockLastName,
-                        max_salary: maxSalary ? parseInt(maxSalary) : null
-                    };
-                }
-
-                if (excludedPlayersRaw) {
-                   const excludedPlayers = excludedPlayersRaw
+                // Parse excluded players (comma-separated)
+                let excludedPlayers = [];
+                if (excludeRaw) {
+                    excludedPlayers = excludeRaw
                         .split(',')
                         .map(s => s.trim())
                         .filter(Boolean);
                 }
 
-                    payload.excluded_players = excludedPlayers;
+                // Build payload
+                const payload = {
+                    csv: csvText,
+                    sport: 'nba'
+                };
+
+                // Add lock if provided
+                if (lockName) {
+                    payload.lock = lockName;
+                    
+                    // Also add metadata for backward compatibility
+                    payload.metadata = {
+                        locked_player: {
+                            last_name: lockName,
+                            max_salary: lockSalary ? parseInt(lockSalary) : null
+                        }
+                    };
+                }
+
+                // Add excludes if provided
+                if (excludedPlayers.length > 0) {
+                    payload.exclude = excludedPlayers;
+                    
+                    // Also add to metadata
+                    if (!payload.metadata) {
+                        payload.metadata = {};
+                    }
                     payload.metadata.excluded_players = excludedPlayers;
+                }
+
+                console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
 
                 const response = await fetch('/api/optimize', {
                     method: 'POST',
@@ -623,6 +699,7 @@
                 });
 
                 const data = await response.json();
+                console.log('📥 Response:', data);
 
                 if (response.ok && data.success) {
                     const jobId = data.job_id;
@@ -645,6 +722,7 @@
                 }
 
             } catch (error) {
+                console.error('❌ Error:', error);
                 showResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
                 optimizeBtn.disabled = false;
                 optimizeBtn.textContent = '🚀 Optimize Lineup';
