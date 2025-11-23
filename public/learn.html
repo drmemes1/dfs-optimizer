@@ -481,7 +481,7 @@
       learnerResult.style.display = 'none';
 
       try {
-        const resp = await fetch('/api/feedback', {
+        const resp = await fetch('/api/learner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -496,48 +496,60 @@
           return;
         }
 
-        if (data.status === 'processing') {
-          learnStatus.textContent = 'Learner job started – check SwarmNode for full details.';
-          runLearnerBtn.disabled = false;
-          return;
+        const stats = data.stats || {};
+        const summaryParts = [];
+
+        if (typeof stats.mae === 'number') {
+          summaryParts.push(`MAE: ${stats.mae.toFixed(2)} pts`);
+        }
+        if (typeof stats.total_diff === 'number') {
+          summaryParts.push(`Total diff: ${stats.total_diff.toFixed(2)} pts`);
+        }
+        if (typeof stats.compared_count === 'number') {
+          summaryParts.push(`Players compared: ${stats.compared_count}/${stats.player_count || loadedLineup.length}`);
         }
 
-        const rv = data.learner_return_value || {};
-        const current = rv.current_weights || rv.current_weights || rv.weights_before || {};
+        learnerSummary.textContent = data.summary || summaryParts.join(' • ');
+
+         // Render any weight outputs (optional, depends on learner agent)
+        const rv = data.learner_return_value || data;
+        const current = rv.current_weights || rv.weights_before || {};
         const suggested = rv.suggested_weights || rv.new_weights || {};
-        const improvement = rv.estimated_improvement || rv.improvement || null;
 
-        learnerSummary.textContent = improvement
-          ? `Estimated improvement: ${improvement}`
-          : 'Learner produced updated weights.';
-
-        // Render weights
         currentWeightsDiv.innerHTML = '';
-        Object.entries(current).forEach(([k, v]) => {
-          const card = document.createElement('div');
-          card.className = 'weight-card';
-          card.innerHTML = `
-            <div class="weight-key">${k}</div>
-            <div class="weight-val">${(v * 100).toFixed(1)}%</div>
-          `;
-          currentWeightsDiv.appendChild(card);
-        });
+        if (Object.keys(current).length) {
+          Object.entries(current).forEach(([k, v]) => {
+            const card = document.createElement('div');
+            card.className = 'weight-card';
+            card.innerHTML = `
+              <div class="weight-key">${k}</div>
+              <div class="weight-val">${(v * 100).toFixed(1)}%</div>
+            `;
+            currentWeightsDiv.appendChild(card);
+          });
+        } else {
+          currentWeightsDiv.innerHTML = '<div class="text-muted">No current weights provided.</div>';
+        }
 
         suggestedWeightsDiv.innerHTML = '';
-        Object.entries(suggested).forEach(([k, v]) => {
-          const card = document.createElement('div');
-          card.className = 'weight-card';
-          card.innerHTML = `
-            <div class="weight-key">${k}</div>
-            <div class="weight-val">${(v * 100).toFixed(1)}%</div>
-          `;
-          suggestedWeightsDiv.appendChild(card);
-        });
+         if (Object.keys(suggested).length) {
+          Object.entries(suggested).forEach(([k, v]) => {
+            const card = document.createElement('div');
+            card.className = 'weight-card';
+            card.innerHTML = `
+              <div class="weight-key">${k}</div>
+              <div class="weight-val">${(v * 100).toFixed(1)}%</div>
+            `;
+            suggestedWeightsDiv.appendChild(card);
+          });
+        } else {
+          suggestedWeightsDiv.innerHTML = '<div class="text-muted">No suggested weights returned.</div>';
+        }
 
-        learnerRecommendation.textContent =
-          rv.recommendation ||
-          rv.message ||
-          'You can copy these suggested weights into your PROJECTIONS agent.';
+        const recs = Array.isArray(data.recommendations) ? data.recommendations : [];
+        learnerRecommendation.textContent = recs.length
+          ? recs.join(' ') :
+          (rv.recommendation || rv.message || 'Comparison complete.');
 
         learnerResult.style.display = 'block';
         learnStatus.textContent = 'Learner complete.';
