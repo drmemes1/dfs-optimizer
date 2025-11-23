@@ -118,6 +118,23 @@ module.exports = async (req, res) => {
     // Front-end can send:
     // - exclude_players / excluded_players: "Curry, Davis"
     //   or ["Curry","Davis"] or ["Stephen Curry","Anthony Davis"]
+    const parseNameList = (raw) => {
+      if (!raw) return [];
+
+      if (typeof raw === "string") {
+        return raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      if (Array.isArray(raw)) {
+        return raw.map((s) => String(s).trim()).filter(Boolean);
+      }
+
+      return [];
+    };
+
     const excludeRaw =
       body.exclude_players ||
       body.excluded_players ||
@@ -125,16 +142,19 @@ module.exports = async (req, res) => {
       body.excludePlayers ||
       "";
 
-    let excludedPlayers = [];
+     // Support legacy UI metadata payloads
+    const metadataExclude =
+      body?.metadata?.excluded_last_names || body?.metadata?.excluded_players;
 
-    if (typeof excludeRaw === "string") {
-      excludedPlayers = excludeRaw
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(excludeRaw)) {
-      excludedPlayers = excludeRaw.map((s) => String(s).trim()).filter(Boolean);
-    }
+    let excludedPlayers = [
+      ...parseNameList(excludeRaw),
+      ...parseNameList(metadataExclude),
+    ];
+
+    // Deduplicate while preserving order
+    excludedPlayers = excludedPlayers.filter(
+      (name, idx) => excludedPlayers.indexOf(name) === idx
+    );
 
     console.log("Exclude raw:", excludeRaw);
     console.log("Excluded players list:", excludedPlayers);
