@@ -349,7 +349,7 @@
                     />
                 </div>
                 <div class="lock-input-group">
-                    <label>Exclude Players (Last names, comma-separated)</label>
+                   <label>Exclude Players (Full names, comma-separated)</label>
                     <input 
                         type="text" 
                         id="excludedPlayers" 
@@ -362,8 +362,8 @@
                 </div>
             </div>
             <div class="lock-info">
-                💡 <strong>How it works:</strong> Enter a player's last name to guarantee them in your lineup. 
-                Use the exclude box to force the optimizer to avoid certain players (by last name).
+                💡 <strong>How it works:</strong> Enter a player's last name to guarantee them in your lineup.
+                Use the exclude box to drop players by their full name (e.g., "Stephen Curry").
             </div>
             <div class="locked-player-display" id="lockedPlayerDisplay"></div>
         </div>
@@ -607,11 +607,14 @@
                 }
 
                 if (excludedPlayersRaw) {
-                    payload.metadata.excluded_last_names = excludedPlayersRaw
+                   const excludedPlayers = excludedPlayersRaw
                         .split(',')
                         .map(s => s.trim())
                         .filter(Boolean);
                 }
+
+                    payload.excluded_players = excludedPlayers;
+                    payload.metadata.excluded_players = excludedPlayers;
 
                 const response = await fetch('/api/optimize', {
                     method: 'POST',
