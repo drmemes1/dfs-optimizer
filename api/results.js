@@ -1,4 +1,4 @@
-// api/results.js - FIXED TO FETCH EXECUTION
+// api/results.js - WITH INITIAL DELAY
 const https = require("https");
 
 function makeRequest(url, options) {
@@ -20,6 +20,10 @@ function makeRequest(url, options) {
     req.on("error", reject);
     req.end();
   });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 module.exports = async (req, res) => {
@@ -62,10 +66,23 @@ module.exports = async (req, res) => {
     console.log("=".repeat(60));
 
     // ========================================================================
-    // STEP 1: List executions (not jobs) for this agent
+    // NEW: Check if this is the first poll (within 15 seconds of job start)
     // ========================================================================
-    const listUrl = `${BASE}/v1/executions/?agent_id=${AGENT_ID}&ordering=-created_at&limit=1`;
-    console.log("\n📋 Fetching latest execution:", listUrl);
+    const skipDelay = req.query?.skip_delay === "true";
+    
+    if (!skipDelay) {
+      console.log("\n⏳ Waiting 10 seconds for optimizer to start...");
+      await sleep(10000);
+      console.log("✅ Wait complete, fetching results...\n");
+    } else {
+      console.log("\n⚡ Skipping initial delay (subsequent poll)\n");
+    }
+
+    // ========================================================================
+    // STEP 1: List executions for this agent
+    // ========================================================================
+    const listUrl = `${BASE}/v1/executions/?agent_id=${AGENT_ID}&ordering=-created_at&limit=3`;
+    console.log("📋 Fetching latest executions:", listUrl);
 
     const listResp = await makeRequest(listUrl, { method: "GET", headers });
     console.log("   Status:", listResp.statusCode);
@@ -101,13 +118,21 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Show available executions for debugging
+    console.log(`\n📋 Found ${executions.length} recent execution(s):`);
+    executions.forEach((exec, idx) => {
+      const createdAt = exec.created_at || exec.created || "unknown";
+      const status = exec.status || "unknown";
+      const hasRv = !!exec.return_value;
+      console.log(`   ${idx + 1}. ID: ${exec.id.substring(0, 8)}... | Created: ${createdAt} | Status: ${status} | Has result: ${hasRv}`);
+    });
+
     const latestExecution = executions[0];
     const executionId = latestExecution.id;
 
-    console.log("   ✅ Latest execution ID:", executionId);
-    console.log("   Created:", latestExecution.created_at || latestExecution.created || "unknown");
+    console.log(`\n✅ Using execution: ${executionId}`);
 
-    // Check if return_value is already in the list response
+    // Check if return_value is in the list response
     if (latestExecution.return_value) {
       console.log("   ✅ Return value found in list response!");
 
@@ -128,6 +153,7 @@ module.exports = async (req, res) => {
 
       console.log("\n✅ RESULTS:");
       console.log("   Lineup players:", lineup.length);
+      console.log("   Total salary:", stats.total_salary || "N/A");
       console.log("   Locked:", lockedPlayer || "none");
       console.log("   Excluded:", excludedPlayers.length);
       console.log("=".repeat(60) + "\n");
@@ -186,7 +212,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log("\n📦 Execution keys:", Object.keys(execution));
+    console.log("📦 Execution keys:", Object.keys(execution));
 
     // Extract return value
     const rv = 
