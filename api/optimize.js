@@ -1,4 +1,4 @@
-// api/optimize.js - working baseline + lock & exclude support
+// api/optimize.js - FIXED VERSION
 const https = require("https");
 
 function makeRequest(url, options, postData) {
@@ -44,7 +44,6 @@ module.exports = async (req, res) => {
   console.log("=== REQUEST DEBUG ===");
   console.log("Content-Type:", req.headers["content-type"]);
   console.log("Body type:", typeof req.body);
-  console.log("Body is Buffer?", Buffer.isBuffer(req.body));
 
   try {
     // -------------------- 1) Parse body safely --------------------
@@ -52,117 +51,80 @@ module.exports = async (req, res) => {
 
     if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
       body = req.body;
-      console.log("Body already parsed by Vercel");
     } else if (Buffer.isBuffer(req.body)) {
       const bodyStr = req.body.toString("utf8");
-      console.log("Body is Buffer, length:", bodyStr.length);
       body = JSON.parse(bodyStr);
     } else if (typeof req.body === "string") {
-      console.log("Body is string, length:", req.body.length);
       body = JSON.parse(req.body);
     } else {
-      console.log("Body is:", req.body);
       return res.status(400).json({
         success: false,
         error: "Invalid request body",
-        debug: {
-          bodyType: typeof req.body,
-          bodyValue: req.body,
-        },
       });
     }
 
     console.log("Parsed body keys:", Object.keys(body));
-    console.log("CSV length:", body.csv?.length || 0);
-    console.log("Sport:", body.sport);
 
-    // -------------------- 2) LOCK INPUT (full name support) --------------------
-    // Front-end can send:
-    // - locked_player: { last_name: "Stephen Curry" }  (old style)
-    // - lock_player_name / locked_name / lock: "Stephen Curry" (new full name)
-    let lockedPlayer = body.locked_player || null;
+    // -------------------- 2) NORMALIZE NAME HELPER --------------------
+    const normalizeName = (name) =>
+      typeof name === "string"
+        ? name.replace(/\s+/g, " ").replace(/\s+,/g, ",").trim()
+        : "";
 
+    // -------------------- 3) LOCK INPUT (supports multiple formats) --------------------
     const lockRaw =
       body.lock_player_name ||
       body.locked_name ||
       body.lock ||
       body.lockPlayers ||
       body.lock_player ||
+      body.locked_player ||
       "";
-    
-const normalizeName = (name) =>
-      typeof name === "string"
-        ? name
-            .replace(/\s+/g, " ")
-            .replace(/\s+,/g, ",")
-            .trim()
-        : "";
 
-    let lockedName = null;
-    if (!lockedPlayer) {
-      if (typeof lockRaw === "string" && lockRaw.trim()) {
-        // Take first name if multiple comma-separated
-       lockedName = normalizeName(lockRaw.split(",")[0]);
-      } else if (lockRaw && typeof lockRaw === "object") {
-        lockedName =
-          normalizeName(
-            lockRaw.full_name || lockRaw.name || lockRaw.last_name || ""
-          ) || null;
-      }
+    let lockedPlayers = []; // Array of full names
 
-      if (lockedName) {
-        // Keep same shape INGEST already expects (last_name key),
-        // but "last_name" may actually be "First Last" now.
-        lockedPlayer = { last_name: lockedName };
-      }
-    } else {
-      // If they already passed an object, try to read a display name for logging
-      lockedName =
-        lockedPlayer.full_name || lockedPlayer.name || lockedPlayer.last_name || null;
+    if (typeof lockRaw === "string" && lockRaw.trim()) {
+      // Comma-separated string: "Stephen Curry, LeBron James"
+      lockedPlayers = lockRaw
+        .split(",")
+        .map((name) => normalizeName(name))
+        .filter(Boolean);
+    } else if (Array.isArray(lockRaw)) {
+      // Already an array
+      lockedPlayers = lockRaw.map((name) => normalizeName(name)).filter(Boolean);
+    } else if (lockRaw && typeof lockRaw === "object") {
+      // Object with name property
+      const name = normalizeName(
+        lockRaw.full_name || lockRaw.name || lockRaw.last_name || ""
+      );
+      if (name) lockedPlayers = [name];
     }
 
-    console.log("Lock raw:", lockRaw);
-    console.log("Locked name (for display):", lockedName);
-    console.log("Locked player object sent to INGEST:", lockedPlayer);
+    console.log("Lock raw input:", lockRaw);
+    console.log("Locked players (normalized):", lockedPlayers);
 
-    // -------------------- 3) EXCLUDE INPUT --------------------
-    // Front-end can send:
-    // - exclude_players / excluded_players: "Curry, Davis"
-    //   or ["Curry","Davis"] or ["Stephen Curry","Anthony Davis"]
-    const parseNameList = (raw) => {
-      if (!raw) return [];
-
-      if (typeof raw === "string") {
-        return raw
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-
-      if (Array.isArray(raw)) {
-        return raw.map((s) => String(s).trim()).filter(Boolean);
-      }
-
-      return [];
-    };
-
+    // -------------------- 4) EXCLUDE INPUT --------------------
     const excludeRaw =
       body.exclude_players ||
       body.excluded_players ||
       body.exclude ||
       body.excludePlayers ||
+      body?.metadata?.excluded_last_names ||
+      body?.metadata?.excluded_players ||
       "";
 
-     // Support legacy UI metadata payloads
-    const metadataExclude =
-      body?.metadata?.excluded_last_names || body?.metadata?.excluded_players;
+    let excludedPlayers = [];
 
-    let excludedPlayers = [
-      ...parseNameList(excludeRaw),
-      ...parseNameList(metadataExclude),
-    ];
+    if (typeof excludeRaw === "string" && excludeRaw.trim()) {
+      excludedPlayers = excludeRaw
+        .split(",")
+        .map((name) => normalizeName(name))
+        .filter(Boolean);
+    } else if (Array.isArray(excludeRaw)) {
+      excludedPlayers = excludeRaw.map((name) => normalizeName(name)).filter(Boolean);
+    }
 
-    // Deduplicate case-insensitively while preserving first appearance
+    // Deduplicate case-insensitively
     const seen = new Set();
     excludedPlayers = excludedPlayers.filter((name) => {
       const key = name.toLowerCase();
@@ -171,30 +133,22 @@ const normalizeName = (name) =>
       return true;
     });
 
-    console.log("Exclude raw:", excludeRaw);
-    console.log("Excluded players list:", excludedPlayers);
+    console.log("Exclude raw input:", excludeRaw);
+    console.log("Excluded players (normalized):", excludedPlayers);
 
-    // -------------------- 4) Env checks --------------------
+    // -------------------- 5) Env checks --------------------
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
-    const SWARMNODE_BASE =
-      process.env.SWARMNODE_BASE || "https://api.swarmnode.ai";
+    const SWARMNODE_BASE = process.env.SWARMNODE_BASE || "https://api.swarmnode.ai";
     const INGEST_AGENT_ID = process.env.INGEST_AGENT_ID;
 
-    if (!SWARMNODE_KEY) {
+    if (!SWARMNODE_KEY || !INGEST_AGENT_ID) {
       return res.status(500).json({
         success: false,
-        error: "SWARMNODE_API_KEY not configured",
+        error: "Missing SWARMNODE_API_KEY or INGEST_AGENT_ID",
       });
     }
 
-    if (!INGEST_AGENT_ID) {
-      return res.status(500).json({
-        success: false,
-        error: "INGEST_AGENT_ID not configured",
-      });
-    }
-
-    // -------------------- 5) Extract CSV + sport --------------------
+    // -------------------- 6) Extract CSV + sport --------------------
     const csvText = body.csv || "";
     const sport = body.sport || "nba";
 
@@ -211,19 +165,19 @@ const normalizeName = (name) =>
       return res.status(400).json({
         success: false,
         error: "CSV must contain Name and Salary columns",
-        first_line: firstLine.substring(0, 100),
       });
     }
 
     console.log("✅ Validation passed, calling SwarmNode...");
 
-    // -------------------- 6) Build payload for INGEST --------------------
+    // -------------------- 7) Build payload for INGEST (FIXED KEYS) --------------------
     const payload = {
       agent_id: INGEST_AGENT_ID,
       payload: {
         csv: csvText,
         sport: sport,
-        locked_player: lockedPlayer || null,
+        // ✅ FIXED: Send as arrays with plural keys
+        locked_players: lockedPlayers.length ? lockedPlayers : null,
         excluded_players: excludedPlayers.length ? excludedPlayers : null,
       },
     };
@@ -232,7 +186,9 @@ const normalizeName = (name) =>
     const postData = JSON.stringify(payload);
 
     console.log("SwarmNode URL:", url);
-    console.log("Payload size:", postData.length, "bytes");
+    console.log("Payload keys:", Object.keys(payload.payload));
+    console.log("Locked players being sent:", payload.payload.locked_players);
+    console.log("Excluded players being sent:", payload.payload.excluded_players);
 
     const response = await makeRequest(
       url,
@@ -248,18 +204,13 @@ const normalizeName = (name) =>
     );
 
     console.log("SwarmNode status:", response.statusCode);
-    console.log("SwarmNode body preview:", response.body.substring(0, 200));
 
-    // -------------------- 7) Handle SwarmNode response --------------------
-    if (
-      response.body.trim().startsWith("<") ||
-      response.body.includes("<!DOCTYPE")
-    ) {
+    // -------------------- 8) Handle SwarmNode response --------------------
+    if (response.body.trim().startsWith("<") || response.body.includes("<!DOCTYPE")) {
       return res.status(502).json({
         success: false,
         error: "SwarmNode returned HTML error page",
         status: response.statusCode,
-        preview: response.body.substring(0, 300),
       });
     }
 
@@ -270,7 +221,6 @@ const normalizeName = (name) =>
       return res.status(502).json({
         success: false,
         error: "Could not parse SwarmNode response",
-        status: response.statusCode,
         body: response.body.substring(0, 500),
       });
     }
@@ -282,10 +232,7 @@ const normalizeName = (name) =>
         success: true,
         message: `${sport.toUpperCase()} optimization started`,
         job_id: result.id || result.job_id,
-        total_salary: "Processing...",
-        total_projection: "Processing...",
-        lineup: "Optimization in progress...",
-        locked_player_used: lockedName || null,
+        locked_players: lockedPlayers,
         excluded_players: excludedPlayers,
         swarmnode_link: "https://app.swarmnode.ai",
       });
@@ -299,14 +246,11 @@ const normalizeName = (name) =>
     });
   } catch (error) {
     console.error("❌ Error:", error.message);
-    console.error("Stack:", error.stack);
 
     return res.status(500).json({
       success: false,
       error: error.message,
       type: error.constructor.name,
-      stack:
-        process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
