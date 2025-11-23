@@ -1,188 +1,172 @@
-// api/results.js - FIXED WITH SUGGESTIONS
-const https = require("https");
-
-function makeRequest(url, options) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const reqOptions = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: options.method || "GET",
-      headers: options.headers || {}
-    };
-
-    const req = https.request(reqOptions, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve({ statusCode: res.statusCode, body: data }));
-    });
-
-    req.on("error", reject);
-    req.end();
-  });
-}
+// api/results.js
+const fetch = require("node-fetch");
 
 module.exports = async (req, res) => {
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") {
+    return res
+      .status(405)
+      .json({ success: false, error: "Method not allowed" });
+  }
+
+  const { job_id } = req.query || {};
+  const SWARMNODE_BASE =
+    process.env.SWARMNODE_BASE || "https://api.swarmnode.ai";
+  const API_KEY = process.env.SWARMNODE_API_KEY;
+  const OPTIMIZER_AGENT_ID = process.env.OPTIMIZER_AGENT_ID;
+
+  if (!API_KEY) {
+    console.error("RESULTS: Missing SWARMNODE_API_KEY");
+    return res
+      .status(500)
+      .json({ success: false, error: "Missing SWARMNODE_API_KEY" });
+  }
 
   try {
-    const KEY = process.env.SWARMNODE_API_KEY;
-    const AGENT_ID = process.env.OPTIMIZER_AGENT_ID;
-    const BASE = (process.env.SWARMNODE_BASE || "https://api.swarmnode.ai").replace(/\/+$/, "");
+    // -------------------------------------------------------
+    // 1) If job_id is provided → fetch that executor job
+    // -------------------------------------------------------
+    if (job_id) {
+      const jobUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${job_id}/`;
+      console.log("📡 RESULTS → Fetching specific executor job:", jobUrl);
 
-    if (!KEY || !AGENT_ID) {
+      const jobRes = await fetch(jobUrl, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+
+      console.log("RESULTS: executor job status:", jobRes.status);
+
+      if (jobRes.status === 404) {
+        return res.status(404).json({
+          success: false,
+          status: "not_found",
+          error: "Job not found",
+        });
+      }
+
+      const jobData = await jobRes.json();
+
+      console.log("RESULTS: job summary:", {
+        id: jobData.id,
+        status: jobData.status,
+        has_output: jobData.has_output,
+        has_result: jobData.has_result,
+        has_return_value: jobData.has_return_value,
+      });
+
+      // No return_value yet → still processing
+      if (!jobData.has_return_value || !jobData.return_value) {
+        return res.status(200).json({
+          success: true,
+          status: jobData.status || "processing",
+        });
+      }
+
+      // Assume return_value already contains lineup/stats
+      return res.status(200).json({
+        success: true,
+        status: "completed",
+        ...jobData.return_value,
+      });
+    }
+
+    // -------------------------------------------------------
+    // 2) No job_id → grab latest OPTIMIZER executor job
+    // -------------------------------------------------------
+    console.log("🔍 RESULTS → Checking latest OPTIMIZER job (no job_id)");
+
+    const listUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/?agent_id=${OPTIMIZER_AGENT_ID}&ordering=-created_at&limit=1`;
+    console.log("Step 1: Listing optimizer jobs from:", listUrl);
+
+    const listRes = await fetch(listUrl, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+
+    console.log("RESULTS: list response status:", listRes.status);
+
+    if (!listRes.ok) {
+      const bodyText = await listRes.text();
+      console.error("RESULTS: Failed to list optimizer jobs:", bodyText);
       return res.status(500).json({
         success: false,
-        error: "Missing SWARMNODE_API_KEY or OPTIMIZER_AGENT_ID"
+        error: "Failed to list optimizer jobs",
       });
     }
 
-    const requestedJobId = req.query?.job_id || req.query?.execution_id || req.query?.id || null;
+    const listData = await listRes.json();
+    const jobs = listData.results || listData || [];
 
-    const headers = {
-      Authorization: `Bearer ${KEY}`,
-      "Content-Type": "application/json",
-    };
-
-    const fetchJobDetail = async (jobId) => {
-      const url = `${BASE}/v1/agent-executor-jobs/${jobId}/`;
-      console.log("🔎 Fetching optimizer job:", url);
-      const resp = await makeRequest(url, { method: "GET", headers });
-      if (resp.statusCode !== 200) {
-        console.log(`⚠️ Job fetch failed with status ${resp.statusCode}`);
-        return null;
-      }
-      return JSON.parse(resp.body);
-    };
-
-    const extractReturnValue = (job) => {
-      if (!job) return null;
-      const exec = job.latest_execution || job.execution || {};
-      return (
-        job.return_value ||
-        job.output ||
-        job.result ||
-        exec.return_value ||
-        exec.output ||
-        exec.result ||
-        null
-      );
-    };
-
-    const findLatestJobId = async () => {
-      const listUrl = `${BASE}/v1/agent-executor-jobs/?agent_id=${AGENT_ID}&ordering=-created_at&limit=1`;
-      console.log("🔎 Listing optimizer jobs:", listUrl);
-      const listResp = await makeRequest(listUrl, { method: "GET", headers });
-      console.log("List status:", listResp.statusCode);
-
-      if (listResp.statusCode !== 200) {
-        console.log("⚠️ List request failed");
-        return null;
-      }
-
-      const listData = JSON.parse(listResp.body);
-      const jobs = listData.results || [];
-      
-      if (!jobs.length) {
-        console.log("⚠️ No jobs found for optimizer agent");
-        return null;
-      }
-
-      console.log(`✅ Found ${jobs.length} job(s), using latest: ${jobs[0].id}`);
-      return jobs[0].id;
-    };
-
-    // Determine which job ID to pull
-    const jobId = requestedJobId || (await findLatestJobId());
-
-    if (!jobId) {
-      console.log("❌ No job ID available");
+    if (!jobs.length) {
       return res.status(200).json({
         success: true,
-        status: "processing",
-        message: "No optimizer jobs found yet"
+        status: "no_jobs",
+        message: "No optimizer jobs found",
       });
     }
 
-    console.log(`📌 Using job ID: ${jobId}`);
+    const latest = jobs[0];
 
-    const job = await fetchJobDetail(jobId);
+    console.log("RESULTS: Found", jobs.length, "optimizer job(s)");
+    console.log("RESULTS: Latest OPTIMIZER job:", {
+      id: latest.id,
+      status: latest.status,
+      agent_id: latest.agent_id,
+      has_return_value: latest.has_return_value,
+    });
 
-    if (!job) {
-      console.log("⚠️ Job not found or not ready");
+    // If latest already has return_value, use it directly
+    if (latest.has_return_value && latest.return_value) {
       return res.status(200).json({
         success: true,
-        status: "processing",
-        job_id: jobId,
-        message: "Job not ready or not found"
+        status: "completed",
+        ...latest.return_value,
       });
     }
 
-    console.log(`📊 Job status: ${job.status || 'unknown'}`);
-    console.log(`📊 Has latest_execution: ${!!job.latest_execution}`);
-    console.log(`📊 Has execution: ${!!job.execution}`);
+    // Otherwise fetch full details for that job
+    const detailUrl = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${latest.id}/`;
+    console.log("Step 2: Retrieving optimizer job details from:", detailUrl);
 
-    const rv = extractReturnValue(job);
-    const executionId = job.latest_execution?.id || job.execution?.id || null;
+    const detailRes = await fetch(detailUrl, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
 
-    if (!rv) {
-      console.log("⌛ Return value not ready yet");
+    console.log("RESULTS: detail response status:", detailRes.status);
+
+    if (!detailRes.ok) {
+      const bodyText = await detailRes.text();
+      console.error("RESULTS: Failed to retrieve optimizer job:", bodyText);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to retrieve optimizer job",
+      });
+    }
+
+    const detail = await detailRes.json();
+
+    if (!detail.has_return_value || !detail.return_value) {
       return res.status(200).json({
         success: true,
-        status: job.status || "processing",
-        job_id: jobId,
-        execution_id: executionId,
-        message: "Optimizer still computing…"
+        status: detail.status || "processing",
       });
     }
-
-    console.log("✅ Return value ready for job", jobId);
-
-    // Parse return value if it's a string
-    let parsedRv = rv;
-    if (typeof rv === 'string') {
-      try {
-        parsedRv = JSON.parse(rv);
-        console.log("✅ Parsed return_value from string");
-      } catch (e) {
-        console.log("⚠️ Could not parse return_value as JSON");
-      }
-    }
-
-    // Extract lineup data
-    const lineup = parsedRv?.lineup || [];
-    const stats = parsedRv?.stats || {};
-    const recommendations = parsedRv?.recommendations || [];
-    const lockedPlayer = parsedRv?.locked_player_used || null;
-    const excludedPlayers = parsedRv?.excluded_players || [];
-
-    console.log(`✅ Lineup has ${lineup.length} players`);
-    console.log(`🔒 Locked player: ${lockedPlayer || 'none'}`);
-    console.log(`❌ Excluded players: ${excludedPlayers.length > 0 ? excludedPlayers.join(', ') : 'none'}`);
 
     return res.status(200).json({
       success: true,
-      status: job.status || "completed",
-      job_id: jobId,
-      execution_id: executionId,
-      lineup: lineup,
-      stats: stats,
-      recommendations: recommendations,
-      locked_player_used: lockedPlayer,
-      excluded_players: excludedPlayers,
-      slate_type: parsedRv?.slate_type || "Classic"
+      status: "completed",
+      ...detail.return_value,
     });
-
   } catch (err) {
-    console.error("❌ Error:", err);
-    return res.status(500).json({ 
-      success: false, 
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    console.error("❌ RESULTS error:", err);
+    return res.status(500).json({
+      success: false,
+      status: "error",
+      error: err.message || String(err),
     });
   }
 };
