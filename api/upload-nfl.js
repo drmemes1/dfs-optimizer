@@ -1,3 +1,4 @@
+// api/upload-nfl.js
 const https = require('https');
 
 function makeRequest(url, options, postData) {
@@ -5,7 +6,7 @@ function makeRequest(url, options, postData) {
     const urlObj = new URL(url);
     const reqOptions = {
       hostname: urlObj.hostname,
-      path: urlObj.pathname,
+      path: urlObj.pathname + (urlObj.search || ""),
       method: options.method || 'POST',
       headers: options.headers || {}
     };
@@ -39,27 +40,83 @@ module.exports = async (req, res) => {
 
     if (!SWARMNODE_KEY || !NFL_INGEST_AGENT_ID) {
       return res.status(500).json({
-        ok: false,
-        error: 'Missing NFL_INGEST_AGENT_ID'
+        success: false,
+        error: 'Missing SWARMNODE_API_KEY or NFL_INGEST_AGENT_ID'
       });
     }
 
-    let csvText = '';
-    if (req.body && typeof req.body === 'object') {
-      csvText = req.body.csv || req.body.csvText || '';
+    // Parse body
+    let body;
+    if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+      body = req.body;
+    } else if (Buffer.isBuffer(req.body)) {
+      body = JSON.parse(req.body.toString('utf8'));
+    } else if (typeof req.body === 'string') {
+      body = JSON.parse(req.body);
+    } else {
+      return res.status(400).json({ success: false, error: 'Invalid request body' });
     }
+
+    const csvText = body.csv || body.csvText || '';
 
     if (!csvText || csvText.length < 50) {
       return res.status(400).json({
-        ok: false,
-        error: 'Invalid CSV'
+        success: false,
+        error: 'Invalid CSV - too short or empty'
       });
     }
 
+    console.log('\n=== NFL UPLOAD DEBUG ===');
+    console.log('CSV length:', csvText.length);
+    console.log('Body keys:', Object.keys(body));
+
+    // Extract lock/exclude (same as NBA)
+    const normalizeName = (name) =>
+      typeof name === "string"
+        ? name.replace(/\s+/g, " ").trim()
+        : "";
+
+    let lockedPlayerName = null;
+    const lockKeys = ["lock", "locked_player", "lock_player", "locked_players"];
+    
+    for (const key of lockKeys) {
+      const val = body[key];
+      if (!val) continue;
+      
+      if (typeof val === "string" && val.trim()) {
+        lockedPlayerName = normalizeName(val);
+        break;
+      } else if (Array.isArray(val) && val.length > 0) {
+        lockedPlayerName = normalizeName(String(val[0]));
+        break;
+      }
+    }
+
+    let excludedPlayers = [];
+    const excludeKeys = ["exclude", "excluded_players", "exclude_players"];
+    
+    for (const key of excludeKeys) {
+      const val = body[key];
+      if (!val) continue;
+      
+      if (typeof val === "string" && val.trim()) {
+        excludedPlayers = val.split(",").map(s => normalizeName(s)).filter(Boolean);
+        break;
+      } else if (Array.isArray(val)) {
+        excludedPlayers = val.map(s => normalizeName(String(s))).filter(Boolean);
+        break;
+      }
+    }
+
+    console.log('Locked player:', lockedPlayerName || 'none');
+    console.log('Excluded players:', excludedPlayers.length > 0 ? excludedPlayers : 'none');
+
     const payload = {
-      csv_text: csvText,
+      csv: csvText,
+      sport: 'nfl',
       slate_date: new Date().toISOString().split('T')[0],
-      sport: 'NFL'
+      locked_players: lockedPlayerName || null,
+      excluded_players: excludedPlayers.length > 0 ? excludedPlayers : null
     };
 
     const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
@@ -67,6 +124,8 @@ module.exports = async (req, res) => {
       agent_id: NFL_INGEST_AGENT_ID,
       payload: payload
     });
+
+    console.log('Sending to SwarmNode...');
 
     const response = await makeRequest(url, {
       method: 'POST',
@@ -85,22 +144,27 @@ module.exports = async (req, res) => {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
+      console.log('✅ NFL pipeline started:', result.id || result.job_id);
+      
       return res.status(200).json({
         success: true,
-        message: '🏈 NFL Pipeline started',
-        job_id: result.job_id || result.id
+        message: '🏈 NFL optimization started',
+        job_id: result.id || result.job_id,
+        locked_player: lockedPlayerName,
+        excluded_players: excludedPlayers
       });
     } else {
       return res.status(response.statusCode || 500).json({
-        ok: false,
+        success: false,
         error: 'NFL agent failed',
         details: result
       });
     }
 
   } catch (error) {
+    console.error('❌ Error:', error);
     return res.status(500).json({
-      ok: false,
+      success: false,
       error: error.message
     });
   }
