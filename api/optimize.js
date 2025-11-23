@@ -41,10 +41,6 @@ module.exports = async (req, res) => {
     return res.status(405).json({ success: false, error: "Method not allowed" });
   }
 
-  console.log("=== REQUEST DEBUG ===");
-  console.log("Content-Type:", req.headers["content-type"]);
-  console.log("Body type:", typeof req.body);
-
   try {
     // -------------------- 1) Parse body safely --------------------
     let body;
@@ -63,65 +59,94 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log("Parsed body keys:", Object.keys(body));
+    console.log("\n=== OPTIMIZE.JS DEBUG ===");
+    console.log("Received body keys:", Object.keys(body));
+    console.log("Full body:", JSON.stringify(body, null, 2));
 
-    // -------------------- 2) NORMALIZE NAME HELPER --------------------
+    // -------------------- 2) Helper to normalize names --------------------
     const normalizeName = (name) =>
       typeof name === "string"
         ? name.replace(/\s+/g, " ").replace(/\s+,/g, ",").trim()
         : "";
 
-    // -------------------- 3) LOCK INPUT (supports multiple formats) --------------------
-    const lockRaw =
-      body.lock_player_name ||
-      body.locked_name ||
-      body.lock ||
-      body.lockPlayers ||
-      body.lock_player ||
-      body.locked_player ||
-      "";
+    // -------------------- 3) LOCK INPUT (SINGLE PLAYER) --------------------
+    let lockedPlayerName = null;
 
-    let lockedPlayers = []; // Array of full names
+    // Check all possible lock keys
+    const lockKeys = [
+      "lock",
+      "locked_player",
+      "lock_player",
+      "lock_player_name",
+      "locked_name",
+      "lockPlayer",
+      "locked_players", // Also check plural in case frontend sends array
+      "lock_players",
+    ];
 
-    if (typeof lockRaw === "string" && lockRaw.trim()) {
-      // Comma-separated string: "Stephen Curry, LeBron James"
-      lockedPlayers = lockRaw
-        .split(",")
-        .map((name) => normalizeName(name))
-        .filter(Boolean);
-    } else if (Array.isArray(lockRaw)) {
-      // Already an array
-      lockedPlayers = lockRaw.map((name) => normalizeName(name)).filter(Boolean);
-    } else if (lockRaw && typeof lockRaw === "object") {
-      // Object with name property
-      const name = normalizeName(
-        lockRaw.full_name || lockRaw.name || lockRaw.last_name || ""
-      );
-      if (name) lockedPlayers = [name];
+    for (const key of lockKeys) {
+      const val = body[key];
+      
+      if (!val) continue;
+
+      console.log(`Checking lock key "${key}":`, val, `(type: ${typeof val})`);
+
+      if (typeof val === "string" && val.trim()) {
+        lockedPlayerName = normalizeName(val);
+        console.log(`✅ Found lock from key "${key}": "${lockedPlayerName}"`);
+        break;
+      } else if (Array.isArray(val) && val.length > 0) {
+        // Take first if array
+        lockedPlayerName = normalizeName(String(val[0]));
+        console.log(`✅ Found lock from array "${key}"[0]: "${lockedPlayerName}"`);
+        break;
+      } else if (typeof val === "object" && val !== null) {
+        // Object format: {name: "...", last_name: "..."}
+        const name = val.full_name || val.name || val.last_name || "";
+        if (name) {
+          lockedPlayerName = normalizeName(name);
+          console.log(`✅ Found lock from object "${key}": "${lockedPlayerName}"`);
+          break;
+        }
+      }
     }
 
-    console.log("Lock raw input:", lockRaw);
-    console.log("Locked players (normalized):", lockedPlayers);
+    console.log("Final locked player name:", lockedPlayerName || "NONE");
 
-    // -------------------- 4) EXCLUDE INPUT --------------------
-    const excludeRaw =
-      body.exclude_players ||
-      body.excluded_players ||
-      body.exclude ||
-      body.excludePlayers ||
-      body?.metadata?.excluded_last_names ||
-      body?.metadata?.excluded_players ||
-      "";
-
+    // -------------------- 4) EXCLUDE INPUT (MULTIPLE PLAYERS) --------------------
     let excludedPlayers = [];
 
-    if (typeof excludeRaw === "string" && excludeRaw.trim()) {
-      excludedPlayers = excludeRaw
-        .split(",")
-        .map((name) => normalizeName(name))
-        .filter(Boolean);
-    } else if (Array.isArray(excludeRaw)) {
-      excludedPlayers = excludeRaw.map((name) => normalizeName(name)).filter(Boolean);
+    // Check all possible exclude keys
+    const excludeKeys = [
+      "exclude",
+      "excluded_players",
+      "exclude_players",
+      "excludePlayers",
+      "excluded",
+    ];
+
+    for (const key of excludeKeys) {
+      const val = body[key];
+      
+      if (!val) continue;
+
+      console.log(`Checking exclude key "${key}":`, val, `(type: ${typeof val})`);
+
+      if (typeof val === "string" && val.trim()) {
+        // Comma-separated string
+        excludedPlayers = val
+          .split(",")
+          .map((name) => normalizeName(name))
+          .filter(Boolean);
+        console.log(`✅ Found excludes from string "${key}": [${excludedPlayers.join(", ")}]`);
+        break;
+      } else if (Array.isArray(val) && val.length > 0) {
+        excludedPlayers = val
+          .map((name) => normalizeName(String(name)))
+          .filter(Boolean);
+        console.log(`✅ Found excludes from array "${key}": [${excludedPlayers.join(", ")}]`);
+        break;
+      }
     }
 
     // Deduplicate case-insensitively
@@ -133,8 +158,7 @@ module.exports = async (req, res) => {
       return true;
     });
 
-    console.log("Exclude raw input:", excludeRaw);
-    console.log("Excluded players (normalized):", excludedPlayers);
+    console.log("Final excluded players:", excludedPlayers.length > 0 ? excludedPlayers : "NONE");
 
     // -------------------- 5) Env checks --------------------
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
@@ -168,27 +192,29 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log("✅ Validation passed, calling SwarmNode...");
+    console.log("✅ CSV validation passed");
 
-    // -------------------- 7) Build payload for INGEST (FIXED KEYS) --------------------
-    const payload = {
+    // -------------------- 7) Build payload for INGEST --------------------
+    const swarmPayload = {
       agent_id: INGEST_AGENT_ID,
       payload: {
         csv: csvText,
         sport: sport,
-        // ✅ FIXED: Send as arrays with plural keys
-        locked_players: lockedPlayers.length ? lockedPlayers : null,
-        excluded_players: excludedPlayers.length ? excludedPlayers : null,
+        // Send single lock (string or null)
+        locked_players: lockedPlayerName || null,
+        // Send multiple excludes (array or null)
+        excluded_players: excludedPlayers.length > 0 ? excludedPlayers : null,
       },
     };
 
-    const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
-    const postData = JSON.stringify(payload);
+    console.log("\n=== SENDING TO SWARMNODE ===");
+    console.log("Payload keys:", Object.keys(swarmPayload.payload));
+    console.log("locked_players:", swarmPayload.payload.locked_players);
+    console.log("excluded_players:", swarmPayload.payload.excluded_players);
+    console.log("===========================\n");
 
-    console.log("SwarmNode URL:", url);
-    console.log("Payload keys:", Object.keys(payload.payload));
-    console.log("Locked players being sent:", payload.payload.locked_players);
-    console.log("Excluded players being sent:", payload.payload.excluded_players);
+    const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
+    const postData = JSON.stringify(swarmPayload);
 
     const response = await makeRequest(
       url,
@@ -203,7 +229,7 @@ module.exports = async (req, res) => {
       postData
     );
 
-    console.log("SwarmNode status:", response.statusCode);
+    console.log("SwarmNode response status:", response.statusCode);
 
     // -------------------- 8) Handle SwarmNode response --------------------
     if (response.body.trim().startsWith("<") || response.body.includes("<!DOCTYPE")) {
@@ -232,7 +258,7 @@ module.exports = async (req, res) => {
         success: true,
         message: `${sport.toUpperCase()} optimization started`,
         job_id: result.id || result.job_id,
-        locked_players: lockedPlayers,
+        locked_player: lockedPlayerName,
         excluded_players: excludedPlayers,
         swarmnode_link: "https://app.swarmnode.ai",
       });
