@@ -1,4 +1,4 @@
-// api/results.js
+// api/results.js - FIXED VERSION WITH CHAIN FOLLOWING
 const https = require('https');
 
 function makeRequest(url, options) {
@@ -22,6 +22,132 @@ function makeRequest(url, options) {
     req.on('error', reject);
     req.end();
   });
+}
+
+async function fetchJobWithRetry(jobId, swarmKey, swarmBase) {
+  const url = `${swarmBase}/v1/agent-executor-jobs/${jobId}/`;
+  
+  const response = await makeRequest(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${swarmKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (response.statusCode !== 200) {
+    throw new Error(`Failed to fetch job ${jobId}: status ${response.statusCode}`);
+  }
+
+  return JSON.parse(response.body);
+}
+
+async function findOptimizerJob(initialJobId, swarmKey, swarmBase, maxDepth = 10) {
+  console.log(`\n🔍 Starting chain search from job: ${initialJobId}`);
+  
+  let currentJobId = initialJobId;
+  let depth = 0;
+
+  while (depth < maxDepth) {
+    console.log(`\n📍 Depth ${depth}: Checking job ${currentJobId}`);
+    
+    try {
+      const jobData = await fetchJobWithRetry(currentJobId, swarmKey, swarmBase);
+      
+      console.log(`   Status: ${jobData.status}`);
+      console.log(`   Agent: ${jobData.agent_name || 'unknown'}`);
+      console.log(`   Has return_value: ${!!jobData.return_value}`);
+
+      const status = jobData.status?.toLowerCase() || 'unknown';
+
+      // If job is still processing, return early
+      if (status === 'pending' || status === 'running' || status === 'processing') {
+        console.log(`   ⏳ Job still processing at depth ${depth}`);
+        return {
+          status: 'processing',
+          message: `Job processing (chain depth: ${depth})`,
+          current_agent: jobData.agent_name || 'unknown'
+        };
+      }
+
+      // If job failed, return error
+      if (status === 'failed') {
+        console.log(`   ❌ Job failed at depth ${depth}`);
+        return {
+          status: 'failed',
+          error: jobData.error || 'Job failed in chain',
+          failed_agent: jobData.agent_name || 'unknown'
+        };
+      }
+
+      // Check if this is the OPTIMIZER (has lineup in return_value)
+      if (jobData.return_value) {
+        let returnValue = jobData.return_value;
+        
+        // Parse if string
+        if (typeof returnValue === 'string') {
+          try {
+            returnValue = JSON.parse(returnValue);
+          } catch (e) {
+            console.log(`   ⚠️ Could not parse return_value as JSON`);
+          }
+        }
+
+        // Check if this is OPTIMIZER output (has lineup)
+        if (returnValue && returnValue.lineup && Array.isArray(returnValue.lineup)) {
+          console.log(`   ✅ Found OPTIMIZER result with ${returnValue.lineup.length} players!`);
+          return {
+            status: 'completed',
+            data: returnValue,
+            final_job_id: currentJobId,
+            chain_depth: depth
+          };
+        }
+
+        // Check for chained job ID
+        if (returnValue && returnValue.chain_result) {
+          const chainResult = returnValue.chain_result;
+          
+          // Look for next job ID in chain_result
+          const nextJobId = 
+            chainResult.response?.id || 
+            chainResult.response?.job_id ||
+            chainResult.job_id ||
+            null;
+
+          if (nextJobId) {
+            console.log(`   ➡️ Following chain to next job: ${nextJobId}`);
+            currentJobId = nextJobId;
+            depth++;
+            continue;
+          }
+        }
+      }
+
+      // If we get here, job is complete but not what we want
+      console.log(`   ⚠️ Job complete but no lineup or chain found`);
+      return {
+        status: 'error',
+        error: 'Chain ended without finding OPTIMIZER results',
+        last_agent: jobData.agent_name || 'unknown',
+        depth: depth
+      };
+
+    } catch (error) {
+      console.error(`   ❌ Error fetching job at depth ${depth}:`, error.message);
+      return {
+        status: 'error',
+        error: error.message,
+        depth: depth
+      };
+    }
+  }
+
+  console.log(`   ⚠️ Max chain depth (${maxDepth}) reached`);
+  return {
+    status: 'error',
+    error: `Max chain depth (${maxDepth}) reached without finding results`
+  };
 }
 
 module.exports = async (req, res) => {
@@ -53,128 +179,61 @@ module.exports = async (req, res) => {
   }
 
   try {
-    console.log(`\n=== FETCHING RESULTS FOR JOB: ${jobId} ===`);
-    
-    const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/${jobId}/`;
-    
-    const response = await makeRequest(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${SWARMNODE_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`RESULTS API: Fetching job ${jobId}`);
+    console.log('='.repeat(60));
 
-    console.log('SwarmNode status:', response.statusCode);
+    const result = await findOptimizerJob(jobId, SWARMNODE_KEY, SWARMNODE_BASE);
 
-    if (response.statusCode !== 200) {
-      return res.status(response.statusCode).json({
-        success: false,
-        error: 'Failed to fetch job status',
-        status: 'error'
-      });
-    }
+    console.log('\n📊 Final result:', result.status);
+    console.log('='.repeat(60) + '\n');
 
-    let jobData;
-    try {
-      jobData = JSON.parse(response.body);
-    } catch (e) {
-      console.error('Failed to parse SwarmNode response:', e);
-      return res.status(502).json({
-        success: false,
-        error: 'Invalid response from SwarmNode',
-        status: 'error'
-      });
-    }
-
-    console.log('Job status:', jobData.status);
-    console.log('Job has return_value:', !!jobData.return_value);
-
-    // Handle job status
-    const status = jobData.status?.toLowerCase() || 'unknown';
-
-    if (status === 'failed') {
-      return res.status(200).json({
-        success: false,
-        status: 'failed',
-        error: jobData.error || 'Job failed'
-      });
-    }
-
-    if (status === 'pending' || status === 'running' || status === 'processing') {
+    // Handle different result statuses
+    if (result.status === 'processing') {
       return res.status(200).json({
         success: true,
         status: 'processing',
-        message: 'Job still processing'
+        message: result.message,
+        current_agent: result.current_agent
       });
     }
 
-    if (status === 'completed' || status === 'success') {
-      // Parse return_value
-      let returnValue = jobData.return_value;
+    if (result.status === 'failed') {
+      return res.status(200).json({
+        success: false,
+        status: 'failed',
+        error: result.error,
+        failed_agent: result.failed_agent
+      });
+    }
 
-      // If return_value is a string, try to parse it
-      if (typeof returnValue === 'string') {
-        try {
-          returnValue = JSON.parse(returnValue);
-        } catch (e) {
-          console.error('Failed to parse return_value string:', e);
-        }
-      }
-
-      console.log('Return value keys:', returnValue ? Object.keys(returnValue) : 'null');
-
-      // Check if we have valid optimizer output
-      if (!returnValue || !returnValue.ok) {
-        return res.status(200).json({
-          success: false,
-          status: 'completed',
-          error: 'Job completed but no valid results',
-          debug: {
-            has_return_value: !!jobData.return_value,
-            return_value_type: typeof jobData.return_value,
-            ok_field: returnValue?.ok
-          }
-        });
-      }
-
-      // Extract lineup data
-      const lineup = returnValue.lineup || [];
-      const stats = returnValue.stats || {};
-      const recommendations = returnValue.recommendations || [];
-      const lockedPlayer = returnValue.locked_player_used || null;
-      const excludedPlayers = returnValue.excluded_players || [];
-
-      console.log('✅ Found lineup with', lineup.length, 'players');
-      console.log('🔒 Locked player:', lockedPlayer);
-      console.log('❌ Excluded players:', excludedPlayers);
-
+    if (result.status === 'completed' && result.data) {
+      const data = result.data;
+      
       return res.status(200).json({
         success: true,
         status: 'completed',
-        lineup: lineup,
-        stats: stats,
-        recommendations: recommendations,
-        locked_player_used: lockedPlayer,
-        excluded_players: excludedPlayers,
-        slate_type: returnValue.slate_type || 'Classic',
-        job_id: jobId
+        lineup: data.lineup || [],
+        stats: data.stats || {},
+        recommendations: data.recommendations || [],
+        locked_player_used: data.locked_player_used || null,
+        excluded_players: data.excluded_players || [],
+        slate_type: data.slate_type || 'Classic',
+        job_id: result.final_job_id,
+        chain_depth: result.chain_depth
       });
     }
 
-    // Unknown status
+    // Error case
     return res.status(200).json({
       success: false,
-      status: 'unknown',
-      error: `Unknown job status: ${status}`,
-      debug: {
-        raw_status: jobData.status,
-        has_return_value: !!jobData.return_value
-      }
+      status: 'error',
+      error: result.error || 'Unknown error',
+      debug: result
     });
 
   } catch (error) {
-    console.error('❌ Error fetching results:', error);
+    console.error('❌ Error in results API:', error);
     
     return res.status(500).json({
       success: false,
