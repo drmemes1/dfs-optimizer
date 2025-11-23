@@ -1,4 +1,4 @@
-// api/results.js - COMPREHENSIVE VERSION
+// api/results.js - FINAL VERSION
 const https = require("https");
 
 function makeRequest(url, options) {
@@ -42,18 +42,16 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Determine sport from query param
-    const sport = req.query?.sport || "nba";
+    // Determine which optimizer to check
+    const sport = (req.query?.sport || "nba").toLowerCase();
     const AGENT_ID = sport === "nfl" ? NFL_OPTIMIZER_AGENT_ID : OPTIMIZER_AGENT_ID;
 
     if (!AGENT_ID) {
       return res.status(500).json({
         success: false,
-        error: `Missing ${sport.toUpperCase()}_OPTIMIZER_AGENT_ID`
+        error: `Missing ${sport.toUpperCase()}_OPTIMIZER_AGENT_ID environment variable`
       });
     }
-
-    const requestedJobId = req.query?.job_id || null;
 
     const headers = {
       Authorization: `Bearer ${KEY}`,
@@ -61,160 +59,98 @@ module.exports = async (req, res) => {
     };
 
     console.log("\n" + "=".repeat(60));
-    console.log(`RESULTS API - ${sport.toUpperCase()}`);
+    console.log(`📊 RESULTS API - ${sport.toUpperCase()} OPTIMIZER`);
+    console.log("   Agent ID:", AGENT_ID);
     console.log("=".repeat(60));
 
-    // ========================================================================
-    // STEP 1: Get the latest optimizer job ID if not provided
-    // ========================================================================
-    const findLatestJobId = async () => {
-      const listUrl = `${BASE}/v1/agent-executor-jobs/?agent_id=${AGENT_ID}&ordering=-created_at&limit=1`;
-      console.log("📋 Listing jobs:", listUrl);
+    // ALWAYS fetch the latest optimizer job - ignore any passed job_id
+    const listUrl = `${BASE}/v1/agent-executor-jobs/?agent_id=${AGENT_ID}&ordering=-created_at&limit=1`;
+    console.log("\n📋 Fetching latest job from:", listUrl);
 
-      const listResp = await makeRequest(listUrl, { method: "GET", headers });
-      console.log("   Status:", listResp.statusCode);
+    const listResp = await makeRequest(listUrl, { method: "GET", headers });
+    console.log("   List status:", listResp.statusCode);
 
-      if (listResp.statusCode !== 200) {
-        console.log("   ❌ List failed");
-        return null;
-      }
-
-      let listData;
-      try {
-        listData = JSON.parse(listResp.body);
-      } catch (e) {
-        console.log("   ❌ Failed to parse list response");
-        return null;
-      }
-
-      // SwarmNode might return { results: [...] } or just [...]
-      const jobs = listData.results || (Array.isArray(listData) ? listData : []);
-
-      if (!jobs.length) {
-        console.log("   ⚠️ No jobs found");
-        return null;
-      }
-
-      console.log(`   ✅ Found ${jobs.length} job(s)`);
-      console.log(`   📌 Latest job ID: ${jobs[0].id}`);
-      
-      return jobs[0].id;
-    };
-
-    const jobId = requestedJobId || (await findLatestJobId());
-
-    if (!jobId) {
-      console.log("❌ No job ID available\n");
+    if (listResp.statusCode !== 200) {
+      console.log("   ❌ Failed to list jobs\n");
       return res.status(200).json({
         success: true,
         status: "processing",
-        message: "No optimizer jobs found yet"
+        message: "Could not fetch optimizer jobs"
       });
     }
 
-    // ========================================================================
-    // STEP 2: Fetch the job details
-    // ========================================================================
-    const fetchJobDetail = async (jid) => {
-      const url = `${BASE}/v1/agent-executor-jobs/${jid}/`;
-      console.log("\n🔍 Fetching job details:", url);
+    let listData;
+    try {
+      listData = JSON.parse(listResp.body);
+    } catch (e) {
+      console.log("   ❌ Failed to parse list response\n");
+      return res.status(502).json({
+        success: false,
+        error: "Invalid response from SwarmNode"
+      });
+    }
 
-      const resp = await makeRequest(url, { method: "GET", headers });
-      console.log("   Status:", resp.statusCode);
+    const jobs = listData.results || (Array.isArray(listData) ? listData : []);
 
-      if (resp.statusCode !== 200) {
-        console.log("   ❌ Job fetch failed");
-        return null;
-      }
+    if (!jobs.length) {
+      console.log("   ⚠️ No optimizer jobs found yet\n");
+      return res.status(200).json({
+        success: true,
+        status: "processing",
+        message: `No ${sport.toUpperCase()} optimizer jobs found yet`
+      });
+    }
 
-      let jobData;
-      try {
-        jobData = JSON.parse(resp.body);
-      } catch (e) {
-        console.log("   ❌ Failed to parse job response");
-        return null;
-      }
+    const latestJob = jobs[0];
+    const jobId = latestJob.id;
 
-      // Log the full structure for debugging
-      console.log("\n📦 RAW JOB OBJECT KEYS:", Object.keys(jobData));
-      
-      // Check all possible status locations
-      const possibleStatus = 
-        jobData.status ||
-        jobData.state ||
-        jobData.job_status ||
-        jobData.execution_status ||
-        (jobData.latest_execution?.status) ||
-        (jobData.execution?.status) ||
-        "unknown";
+    console.log("   ✅ Latest job ID:", jobId);
+    console.log("   Created:", latestJob.created || "unknown");
 
-      console.log("   Status field:", possibleStatus);
+    // Now fetch the full job details
+    const jobUrl = `${BASE}/v1/agent-executor-jobs/${jobId}/`;
+    console.log("\n🔍 Fetching job details:", jobUrl);
 
-      // Check all possible return value locations
-      const rvLocations = {
-        "return_value": jobData.return_value,
-        "output": jobData.output,
-        "result": jobData.result,
-        "data": jobData.data,
-        "latest_execution.return_value": jobData.latest_execution?.return_value,
-        "latest_execution.output": jobData.latest_execution?.output,
-        "latest_execution.result": jobData.latest_execution?.result,
-        "execution.return_value": jobData.execution?.return_value,
-        "execution.output": jobData.execution?.output,
-        "execution.result": jobData.execution?.result,
-      };
+    const jobResp = await makeRequest(jobUrl, { method: "GET", headers });
+    console.log("   Status:", jobResp.statusCode);
 
-      console.log("\n📊 Return value locations:");
-      for (const [key, val] of Object.entries(rvLocations)) {
-        console.log(`   ${key}: ${val ? "✅ EXISTS" : "❌ null"} (type: ${typeof val})`);
-      }
-
-      return jobData;
-    };
-
-    const job = await fetchJobDetail(jobId);
-
-    if (!job) {
-      console.log("\n❌ Job not found\n");
+    if (jobResp.statusCode !== 200) {
+      console.log("   ❌ Failed to fetch job details\n");
       return res.status(200).json({
         success: true,
         status: "processing",
         job_id: jobId,
-        message: "Job not ready or not found"
+        message: "Job details not available"
       });
     }
 
-    // ========================================================================
-    // STEP 3: Extract return value from ANY possible location
-    // ========================================================================
-    const extractReturnValue = (jobData) => {
-      // Try all possible locations
-      const candidates = [
-        jobData.return_value,
-        jobData.output,
-        jobData.result,
-        jobData.data,
-        jobData.latest_execution?.return_value,
-        jobData.latest_execution?.output,
-        jobData.latest_execution?.result,
-        jobData.execution?.return_value,
-        jobData.execution?.output,
-        jobData.execution?.result,
-      ];
+    let job;
+    try {
+      job = JSON.parse(jobResp.body);
+    } catch (e) {
+      console.log("   ❌ Failed to parse job response\n");
+      return res.status(502).json({
+        success: false,
+        error: "Invalid job response from SwarmNode"
+      });
+    }
 
-      for (const candidate of candidates) {
-        if (candidate) {
-          console.log("\n✅ Found return value!");
-          return candidate;
-        }
-      }
+    console.log("\n📦 Job object keys:", Object.keys(job));
 
-      return null;
-    };
+    // Extract return value from all possible locations
+    const rv = 
+      job.return_value ||
+      job.output ||
+      job.result ||
+      job.data ||
+      job.latest_execution?.return_value ||
+      job.latest_execution?.output ||
+      job.latest_execution?.result ||
+      job.execution?.return_value ||
+      job.execution?.output ||
+      job.execution?.result ||
+      null;
 
-    const rawReturnValue = extractReturnValue(job);
-
-    // Extract status
     const jobStatus = 
       job.status ||
       job.state ||
@@ -222,82 +158,62 @@ module.exports = async (req, res) => {
       job.execution?.status ||
       "unknown";
 
-    const executionId = job.latest_execution?.id || job.execution?.id || null;
-
-    console.log("\n📊 Extraction results:");
     console.log("   Job status:", jobStatus);
-    console.log("   Has return value:", !!rawReturnValue);
-    console.log("   Return value type:", typeof rawReturnValue);
+    console.log("   Has return_value:", !!rv);
 
-    // If no return value yet
-    if (!rawReturnValue) {
-      console.log("\n⌛ Return value not ready yet\n");
+    if (!rv) {
+      console.log("\n⌛ No return value yet - job still processing\n");
       return res.status(200).json({
         success: true,
         status: jobStatus === "completed" ? "processing" : jobStatus,
         job_id: jobId,
-        execution_id: executionId,
-        message: "Optimizer still computing…"
+        message: `${sport.toUpperCase()} optimizer still computing…`
       });
     }
 
-    // ========================================================================
-    // STEP 4: Parse return value
-    // ========================================================================
-    let parsedRv = rawReturnValue;
-
-    if (typeof rawReturnValue === 'string') {
+    // Parse if string
+    let parsedRv = rv;
+    if (typeof rv === 'string') {
       try {
-        parsedRv = JSON.parse(rawReturnValue);
-        console.log("✅ Parsed return_value from JSON string");
+        parsedRv = JSON.parse(rv);
+        console.log("   ✅ Parsed return_value from JSON string");
       } catch (e) {
-        console.log("⚠️ Could not parse return_value as JSON");
-        console.log("   Raw value:", rawReturnValue.substring(0, 200));
+        console.log("   ⚠️ Return value is not valid JSON");
       }
     }
 
-    // ========================================================================
-    // STEP 5: Extract lineup data
-    // ========================================================================
+    // Extract lineup data
     const lineup = parsedRv?.lineup || [];
     const stats = parsedRv?.stats || {};
     const recommendations = parsedRv?.recommendations || [];
     const lockedPlayer = parsedRv?.locked_player_used || null;
     const excludedPlayers = parsedRv?.excluded_players || [];
 
-    console.log("\n📊 Final data:");
+    console.log("\n✅ RESULTS FOUND:");
     console.log("   Lineup players:", lineup.length);
-    console.log("   Locked player:", lockedPlayer || 'none');
-    console.log("   Excluded players:", excludedPlayers.length);
+    console.log("   Total salary:", stats.total_salary || "N/A");
+    console.log("   Total projection:", stats.total_projection || "N/A");
+    console.log("   Locked player:", lockedPlayer || "none");
+    console.log("   Excluded:", excludedPlayers.length);
     console.log("=".repeat(60) + "\n");
 
-    // If lineup is empty, something is wrong
-    if (!lineup || lineup.length === 0) {
-      console.log("⚠️ WARNING: Lineup is empty!");
-      
+    if (lineup.length === 0) {
       return res.status(200).json({
         success: false,
         status: "error",
-        error: "Lineup is empty or not found",
+        error: "Lineup is empty",
         job_id: jobId,
         debug: {
-          has_return_value: !!rawReturnValue,
-          return_value_keys: parsedRv ? Object.keys(parsedRv) : [],
-          raw_return_value_preview: typeof rawReturnValue === 'string' 
-            ? rawReturnValue.substring(0, 200)
-            : JSON.stringify(rawReturnValue).substring(0, 200)
+          has_rv: !!rv,
+          rv_keys: parsedRv ? Object.keys(parsedRv) : []
         }
       });
     }
 
-    // ========================================================================
-    // STEP 6: Return formatted response
-    // ========================================================================
     return res.status(200).json({
       success: true,
       status: "completed",
       job_id: jobId,
-      execution_id: executionId,
       lineup: lineup,
       stats: stats,
       recommendations: recommendations,
@@ -313,8 +229,7 @@ module.exports = async (req, res) => {
     
     return res.status(500).json({ 
       success: false, 
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      error: err.message
     });
   }
 };
