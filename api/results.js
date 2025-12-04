@@ -66,13 +66,13 @@ module.exports = async (req, res) => {
     console.log("=".repeat(60));
 
     // ========================================================================
-    // Wait 120 seconds on first poll for optimizer to start
+    // Wait 80 seconds on first poll for optimizer to start
     // ========================================================================
     const skipDelay = req.query?.skip_delay === "true";
     
     if (!skipDelay) {
-      console.log("\n⏳ Waiting 120 seconds for optimizer to start...");
-      await sleep(120000);
+      console.log("\n⏳ Waiting 80 seconds for optimizer to start...");
+      await sleep(80000);
       console.log("✅ Wait complete, fetching results...\n");
     } else {
       console.log("\n⚡ Skipping initial delay (subsequent poll)\n");
