@@ -1,5 +1,108 @@
-// api/optimize.js - FIXED VERSION
+// api/optimize.js - ROTOGRINDERS VERSION
+// Updated to parse RotoGrinders CSV format directly
+
 const https = require("https");
+
+// Minimal CSV splitter that respects quotes
+function splitCsvLine(line, delim = ",") {
+  const cells = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === delim && !inQuotes) {
+      cells.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+
+  cells.push(cur.trim());
+  return cells;
+}
+
+// Validate RotoGrinders CSV format
+function validateRotoGrindersCsv(csvText) {
+  const lines = (csvText || "").replace(/\r\n/g, "\n").split("\n").filter(Boolean);
+  
+  if (lines.length < 2) {
+    return { valid: false, error: "CSV has fewer than 2 lines" };
+  }
+
+  const header = lines[0].toLowerCase();
+  
+  // Check for required RotoGrinders columns
+  const requiredCols = ["name", "salary", "fpts", "pos", "team"];
+  const missingCols = requiredCols.filter(col => !header.includes(col));
+  
+  if (missingCols.length > 0) {
+    return { 
+      valid: false, 
+      error: `Missing required columns: ${missingCols.join(", ")}. Make sure you're uploading a RotoGrinders export.`
+    };
+  }
+
+  // Optional but recommended columns
+  const optionalCols = ["floor", "ceil", "minutes", "smash", "proj_own"];
+  const presentOptional = optionalCols.filter(col => header.includes(col));
+  
+  return { 
+    valid: true, 
+    playerCount: lines.length - 1,
+    hasOptional: presentOptional
+  };
+}
+
+// Quick stats from CSV
+function getQuickStats(csvText) {
+  const lines = (csvText || "").replace(/\r\n/g, "\n").split("\n").filter(Boolean);
+  if (lines.length < 2) return {};
+
+  const header = splitCsvLine(lines[0]).map(h => h.toLowerCase());
+  const salaryIdx = header.indexOf("salary");
+  const fptsIdx = header.indexOf("fpts");
+  const teamIdx = header.indexOf("team");
+
+  let totalPlayers = 0;
+  let avgSalary = 0;
+  let avgProj = 0;
+  const teams = new Set();
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = splitCsvLine(lines[i]);
+    const salary = parseFloat((row[salaryIdx] || "0").replace(/[$,]/g, ""));
+    const proj = parseFloat(row[fptsIdx] || "0");
+    const team = row[teamIdx] || "";
+
+    if (salary > 0) {
+      totalPlayers++;
+      avgSalary += salary;
+      avgProj += proj;
+      if (team) teams.add(team.toUpperCase());
+    }
+  }
+
+  return {
+    playerCount: totalPlayers,
+    avgSalary: totalPlayers > 0 ? Math.round(avgSalary / totalPlayers) : 0,
+    avgProjection: totalPlayers > 0 ? (avgProj / totalPlayers).toFixed(1) : 0,
+    teamCount: teams.size,
+    teams: Array.from(teams).sort()
+  };
+}
 
 function makeRequest(url, options, postData) {
   return new Promise((resolve, reject) => {
@@ -59,9 +162,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log("\n=== OPTIMIZE.JS DEBUG ===");
+    console.log("\n=== OPTIMIZE.JS (RotoGrinders) ===");
     console.log("Received body keys:", Object.keys(body));
-    console.log("Full body:", JSON.stringify(body, null, 2));
 
     // -------------------- 2) Helper to normalize names --------------------
     const normalizeName = (name) =>
@@ -72,84 +174,47 @@ module.exports = async (req, res) => {
     // -------------------- 3) LOCK INPUT (SINGLE PLAYER) --------------------
     let lockedPlayerName = null;
 
-    // Check all possible lock keys
     const lockKeys = [
-      "lock",
-      "locked_player",
-      "lock_player",
-      "lock_player_name",
-      "locked_name",
-      "lockPlayer",
-      "locked_players", // Also check plural in case frontend sends array
-      "lock_players",
+      "lock", "locked_player", "lock_player", "lock_player_name",
+      "locked_name", "lockPlayer", "locked_players", "lock_players",
     ];
 
     for (const key of lockKeys) {
       const val = body[key];
-      
       if (!val) continue;
-
-      console.log(`Checking lock key "${key}":`, val, `(type: ${typeof val})`);
 
       if (typeof val === "string" && val.trim()) {
         lockedPlayerName = normalizeName(val);
-        console.log(`✅ Found lock from key "${key}": "${lockedPlayerName}"`);
+        console.log(`✅ Found lock: "${lockedPlayerName}"`);
         break;
       } else if (Array.isArray(val) && val.length > 0) {
-        // Take first if array
         lockedPlayerName = normalizeName(String(val[0]));
-        console.log(`✅ Found lock from array "${key}"[0]: "${lockedPlayerName}"`);
+        console.log(`✅ Found lock from array: "${lockedPlayerName}"`);
         break;
-      } else if (typeof val === "object" && val !== null) {
-        // Object format: {name: "...", last_name: "..."}
-        const name = val.full_name || val.name || val.last_name || "";
-        if (name) {
-          lockedPlayerName = normalizeName(name);
-          console.log(`✅ Found lock from object "${key}": "${lockedPlayerName}"`);
-          break;
-        }
       }
     }
-
-    console.log("Final locked player name:", lockedPlayerName || "NONE");
 
     // -------------------- 4) EXCLUDE INPUT (MULTIPLE PLAYERS) --------------------
     let excludedPlayers = [];
 
-    // Check all possible exclude keys
     const excludeKeys = [
-      "exclude",
-      "excluded_players",
-      "exclude_players",
-      "excludePlayers",
-      "excluded",
+      "exclude", "excluded_players", "exclude_players", "excludePlayers", "excluded",
     ];
 
     for (const key of excludeKeys) {
       const val = body[key];
-      
       if (!val) continue;
 
-      console.log(`Checking exclude key "${key}":`, val, `(type: ${typeof val})`);
-
       if (typeof val === "string" && val.trim()) {
-        // Comma-separated string
-        excludedPlayers = val
-          .split(",")
-          .map((name) => normalizeName(name))
-          .filter(Boolean);
-        console.log(`✅ Found excludes from string "${key}": [${excludedPlayers.join(", ")}]`);
+        excludedPlayers = val.split(",").map(n => normalizeName(n)).filter(Boolean);
         break;
       } else if (Array.isArray(val) && val.length > 0) {
-        excludedPlayers = val
-          .map((name) => normalizeName(String(name)))
-          .filter(Boolean);
-        console.log(`✅ Found excludes from array "${key}": [${excludedPlayers.join(", ")}]`);
+        excludedPlayers = val.map(n => normalizeName(String(n))).filter(Boolean);
         break;
       }
     }
 
-    // Deduplicate case-insensitively
+    // Deduplicate
     const seen = new Set();
     excludedPlayers = excludedPlayers.filter((name) => {
       const key = name.toLowerCase();
@@ -158,7 +223,8 @@ module.exports = async (req, res) => {
       return true;
     });
 
-    console.log("Final excluded players:", excludedPlayers.length > 0 ? excludedPlayers : "NONE");
+    console.log("Locked:", lockedPlayerName || "NONE");
+    console.log("Excluded:", excludedPlayers.length > 0 ? excludedPlayers : "NONE");
 
     // -------------------- 5) Env checks --------------------
     const SWARMNODE_KEY = process.env.SWARMNODE_API_KEY;
@@ -172,8 +238,9 @@ module.exports = async (req, res) => {
       });
     }
 
-    // -------------------- 6) Extract CSV + sport --------------------
+    // -------------------- 6) Extract and Validate CSV --------------------
     const csvText = body.csv || "";
+    const mode = (body.mode || "CASH").toUpperCase();
     const sport = body.sport || "nba";
 
     if (!csvText || csvText.length < 50) {
@@ -184,15 +251,23 @@ module.exports = async (req, res) => {
       });
     }
 
-    const firstLine = csvText.split("\n")[0].toLowerCase();
-    if (!firstLine.includes("name") || !firstLine.includes("salary")) {
+    // Validate RotoGrinders format
+    const validation = validateRotoGrindersCsv(csvText);
+    if (!validation.valid) {
       return res.status(400).json({
         success: false,
-        error: "CSV must contain Name and Salary columns",
+        error: validation.error,
+        hint: "Make sure you're uploading a RotoGrinders CSV export with columns: name, salary, fpts, pos, team"
       });
     }
 
-    console.log("✅ CSV validation passed");
+    // Get quick stats
+    const stats = getQuickStats(csvText);
+    console.log("CSV Stats:", stats);
+
+    console.log("✅ RotoGrinders CSV validation passed");
+    console.log(`   Players: ${validation.playerCount}`);
+    console.log(`   Optional columns present: ${validation.hasOptional.join(", ")}`);
 
     // -------------------- 7) Build payload for INGEST --------------------
     const swarmPayload = {
@@ -200,18 +275,16 @@ module.exports = async (req, res) => {
       payload: {
         csv: csvText,
         sport: sport,
-        // Send single lock (string or null)
+        mode: mode,
         locked_players: lockedPlayerName || null,
-        // Send multiple excludes (array or null)
         excluded_players: excludedPlayers.length > 0 ? excludedPlayers : null,
       },
     };
 
     console.log("\n=== SENDING TO SWARMNODE ===");
-    console.log("Payload keys:", Object.keys(swarmPayload.payload));
-    console.log("locked_players:", swarmPayload.payload.locked_players);
-    console.log("excluded_players:", swarmPayload.payload.excluded_players);
-    console.log("===========================\n");
+    console.log("Mode:", mode);
+    console.log("Locked:", swarmPayload.payload.locked_players);
+    console.log("Excluded:", swarmPayload.payload.excluded_players);
 
     const url = `${SWARMNODE_BASE}/v1/agent-executor-jobs/create/`;
     const postData = JSON.stringify(swarmPayload);
@@ -256,10 +329,17 @@ module.exports = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: `${sport.toUpperCase()} optimization started`,
+        message: `${sport.toUpperCase()} optimization started (${mode} mode)`,
         job_id: result.id || result.job_id,
+        mode: mode,
         locked_player: lockedPlayerName,
         excluded_players: excludedPlayers,
+        stats: {
+          players: stats.playerCount,
+          teams: stats.teamCount,
+          avgSalary: stats.avgSalary,
+          avgProjection: stats.avgProjection
+        },
         swarmnode_link: "https://app.swarmnode.ai",
       });
     }
