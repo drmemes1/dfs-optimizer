@@ -1,5 +1,14 @@
 node_modules/
 .vercel
 .env
+.env*.local
 .DS_Store
 *.log
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Paid projection data never goes in git
+data/
+*.csv
+!tests/fixtures/*.csv
