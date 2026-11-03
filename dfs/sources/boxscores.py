@@ -12,6 +12,8 @@ A game's box score is accepted only if ALL of these hold:
   4. each team's score equals Basketball-Reference's final score.
 Anything else is rejected and retried on the next run."""
 
+import re
+
 from bs4 import BeautifulSoup
 
 from ..http import get, get_json
@@ -101,18 +103,23 @@ def parse_bref_day(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     finals = {}
     for g in soup.select("div.game_summary"):
-        rows = g.select("table.teams tr")
+        teams_table = g.select_one("table.teams")
+        if not teams_table:
+            continue
         scores = {}
-        for tr in rows:
-            a = tr.find("a")
-            cells = tr.find_all("td")
-            if not a or len(cells) < 2:
+        for tr in teams_table.select("tr"):
+            a = tr.find("a", href=re.compile(r"^/teams/"))
+            score_td = tr.find("td", class_="right")
+            if not a or not score_td:
                 continue
-            abbr = BREF_TEAMS.get(a.get_text(strip=True))
-            score = _int(cells[1].get_text(strip=True), None)
+            m = re.match(r"^/teams/([A-Z]{3})/", a["href"])
+            abbr = team_code(m.group(1)) if m else BREF_TEAMS.get(a.get_text(strip=True))
+            score = _int(score_td.get_text(strip=True), None)
             if abbr and score is not None:
                 scores[abbr] = score
-        if len(scores) == 2 and "final" in g.get_text(" ", strip=True).lower():
+        # "Final" is rendered as F<span>inal</span>, so join text without separators
+        is_final = "final" in teams_table.get_text("", strip=True).lower()
+        if len(scores) == 2 and is_final:
             finals[frozenset(scores)] = scores
     return finals
 

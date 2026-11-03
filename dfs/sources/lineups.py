@@ -19,7 +19,7 @@ RG_LINEUPS_URL = "https://rotogrinders.com/lineups/nba?site=draftkings"
 _TEAM_ALIASES = {
     "GS": "GSW", "GSW": "GSW", "NO": "NOP", "NOP": "NOP", "NOR": "NOP", "NY": "NYK", "NYK": "NYK",
     "SA": "SAS", "SAS": "SAS", "PHO": "PHX", "PHX": "PHX", "UTA": "UTA", "UTAH": "UTA", "WAS": "WAS",
-    "WSH": "WAS", "BKN": "BKN", "BRK": "BKN", "CHA": "CHA", "CHO": "CHA",
+    "WSH": "WAS", "BKN": "BKN", "BRK": "BKN", "CHA": "CHA", "CHO": "CHA", "PHL": "PHI",
 }
 
 
