@@ -23,6 +23,11 @@
       players in our lineups and on the value board
 - [ ] Grade job: verified box scores (240/265/290 minutes + score cross-check), actuals, MAE ours vs RG,
       bucket/game bias, hindsight-perfect lineup, missed plays
+- [ ] **Backfill + Research page:** for a date range, pull verified box scores (StatMuse) and past salaries
+      (user's saved DK CSVs; RotoGuru if available) and import the user's saved RotoGrinders exports/graded
+      results. Reports: value-board hit rates across many slates, hindsight-perfect lineup shapes
+      (salary spread, sub-$5.5K count, game concentration), injury-beneficiary outcomes by salary, and
+      RotoGrinders bias by bucket. Findings are reports only until a backtest proves they help.
 - [ ] Learner: propose bias nudges, replay on past slates, append params with evidence; "What changed" page
 - [ ] UI: slate page (lineups, value board A-D, injury watch, news & buzz), accuracy chart, DK CSV export,
       history browser
