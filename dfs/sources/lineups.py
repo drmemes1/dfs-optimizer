@@ -10,7 +10,7 @@ import re
 from bs4 import BeautifulSoup
 
 from ..http import get
-from ..names import NameIndex, name_norm
+from ..names import NameIndex, match_key, name_norm
 
 ROTOWIRE_URL = "https://www.rotowire.com/basketball/nba-lineups.php"
 RG_LINEUPS_URL = "https://rotogrinders.com/lineups/nba?site=draftkings"
@@ -160,6 +160,19 @@ def fetch_all() -> dict:
 
 
 # ---------------------------------------------------------------- cross-check onto the pool
+def _pos_groups(pos: str | None) -> set:
+    """'SF/PF' -> {'F'}; 'G' -> {'G'}; 'PF/C' -> {'F', 'C'}."""
+    groups = set()
+    for x in (pos or "").upper().replace(" ", "").split("/"):
+        if x in ("PG", "SG", "G"):
+            groups.add("G")
+        elif x in ("SF", "PF", "F"):
+            groups.add("F")
+        elif x == "C":
+            groups.add("C")
+    return groups
+
+
 SEVERITY = {"": 0, "P": 0, "Q": 1, "GTD": 1, "D": 2, "O": 3, "OUT": 3}
 
 
@@ -234,7 +247,12 @@ def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> d
         disputed = len(known) == 2 and known[0] != known[1]
         unresolved = False
         if p["starter_consensus"] and rw and rw["status"] != "confirmed":
-            unresolved = any(tag in ("Q", "GTD", "D") for pid, tag in rw_tags.get(team, {}).items() if pid != id(p))
+            # his start plausibly depends on a teammate RotoWire lists as may-not-play with an unresolved
+            # tag at an overlapping position (not merely any questionable teammate)
+            mine = _pos_groups(p.get("pos"))
+            unresolved = any(e["inj"] in ("Q", "GTD", "D") and _pos_groups(e.get("pos")) & mine
+                             and match_key(e["name"]) != match_key(p["name"])
+                             for e in rw["may_not_play"])
         p["contingent"] = p["salary"] < cheap_cutoff and (disputed or unresolved)
         if disputed and p["salary"] < cheap_cutoff:
             report["disagreements"].append({"name": p["name"], "team": team, "rotowire_starter": p["starter_rw"],

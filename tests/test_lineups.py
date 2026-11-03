@@ -41,18 +41,20 @@ def test_cross_check_consensus_contingent_vegas():
         _p("Kenrich Williams", "OKC", "CLE", 4300),     # both say starter, OKC confirmed -> consensus, not contingent
         _p("Meleek Thomas", "CLE", "OKC", 3300),        # RotoWire starter, RG bench -> disputed -> contingent
         _p("Jaylon Tyson", "CLE", "OKC", 3500),         # RG starter, RotoWire may-not-play (Ques) -> disputed
-        _p("Evan Mobley", "CLE", "OKC", 8000),          # consensus starter, expensive -> never contingent
+        _p("James Harden", "CLE", "OKC", 9000, pos="PG"),  # consensus starter, expensive -> never contingent
         _p("Chet Holmgren", "OKC", "CLE", 7500),        # Out per RotoWire
-        _p("Jarrett Allen", "CLE", "OKC", 5000),        # consensus but CLE unconfirmed with a GTD starter -> contingent
+        _p("Jarrett Allen", "CLE", "OKC", 5000, pos="C"),   # CLE unconfirmed, but the Q teammate is a forward -> not contingent
+        _p("Evan Mobley", "CLE", "OKC", 5200, pos="PF"),    # same position group as the Q forward -> contingent
     ]
     rep = apply_lineups(ps, src)
-    k, mt, jt, em, ch, ja = ps
+    k, mt, jt, em, ch, ja, em_cheap = ps
     assert k["starter_consensus"] and not k["contingent"]
     assert mt["starter_rw"] and not mt["starter_rg"] and mt["contingent"]
     assert jt["contingent"] and jt["inj_status"] == "Q"
-    assert em["starter_consensus"] and not em["contingent"]
+    assert em["starter_consensus"] and not em["contingent"]   # Harden
     assert ch["inj_status"] == "O"
-    assert ja["starter_consensus"] and ja["contingent"]
+    assert ja["starter_consensus"] and not ja["contingent"]
+    assert em_cheap["starter_consensus"] and em_cheap["contingent"]
     assert k["vegas_total"] == 229.5 and k["fav_ml"] == -173       # RotoGrinders Vegas preferred
     assert {d["name"] for d in rep["disagreements"]} == {"Meleek Thomas", "Jaylon Tyson"}
     assert rep["sources"] == {"rotowire": True, "rotogrinders": True}

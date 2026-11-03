@@ -42,7 +42,7 @@ def snapshot(now: datetime | None = None, fetch=None) -> dict:
             refreshed = []
             for sid in slate_ids:
                 try:
-                    out = pipeline.run_refresh(slate_id=sid, fetch=lambda: src, now=now)
+                    out = pipeline.run_refresh(slate_id=sid, fetch=lambda: src, now=now, save_raw_pages=False)
                     refreshed.append({"slate_id": sid, "flags": len(out["check"]["flags"]),
                                       "swappable": sum(1 for f in out["check"]["flags"] if not f["locked"])})
                 except Exception as e:  # noqa: BLE001 - recorded on the run

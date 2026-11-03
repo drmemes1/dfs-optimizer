@@ -176,8 +176,13 @@ def save_pool(cur, slate_id, players, reason, params_version) -> dict:
                    WHERE slate_id = %s AND NOT (player_id = ANY(%s))""", (slate_id, pids))
     snap = [{"player_id": key_to_pid[p["key"]], "name": p["name"],
              **{c: p.get(c) for c in POOL_COLS}} for p in players]
-    cur.execute("INSERT INTO pool_snapshots(slate_id, reason, params_version, rows) VALUES (%s,%s,%s,%s)",
-                (slate_id, reason, params_version, json.dumps(snap, default=str)))
+    body = json.dumps(snap, default=str, sort_keys=True)
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    cur.execute("SELECT rows_sha FROM pool_snapshots WHERE slate_id=%s ORDER BY taken_at DESC LIMIT 1", (slate_id,))
+    last = cur.fetchone()
+    if not last or last["rows_sha"] != sha:   # unchanged pools (most 20-minute re-checks) are not stored again
+        cur.execute("INSERT INTO pool_snapshots(slate_id, reason, params_version, rows, rows_sha) VALUES (%s,%s,%s,%s,%s)",
+                    (slate_id, reason, params_version, body, sha))
     return key_to_pid
 
 
@@ -330,7 +335,7 @@ def _stored_upload(cur, source, slate_id):
 
 
 def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=None, dk_name=None,
-                slate_id=None, fetch=None, now=None) -> dict:
+                slate_id=None, fetch=None, now=None, save_raw_pages=True) -> dict:
     """Late news. Re-reads both lineup pages for starters and injury tags; a fresh RotoGrinders export
     and/or DKSalaries.csv are optional (the slate's stored files are reused). The pool is updated in
     place, saved lineups are left alone, then the late-scratch check runs."""
@@ -350,7 +355,8 @@ def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=No
             save_pool(cur, slate_id, prep["players"], "refresh", version)
             save_uploads(cur, slate_id, {"rg_projections_csv": (rg_name, new_rg_raw),
                                          "dk_salaries_csv": (dk_name, new_dk_raw)})
-            save_pages(cur, slate_id, lineup_src)
+            if save_raw_pages:   # the scheduler skips this: history tables already record every change
+                save_pages(cur, slate_id, lineup_src)
         conn.commit()
         result = check(conn, slate_id, now=now)
     return {"slate_id": slate_id, **_summary(prep), "check": result}
