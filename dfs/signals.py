@@ -13,7 +13,7 @@ Floor and ceiling get the same multiplier. value = proj_adj / (salary / 1000).
 import numpy as np
 
 QUESTIONABLE = {"Q", "GTD", "D"}
-OUT = {"O", "OUT", "INJ", "NA", "SUSP"}
+OUT = {"O", "OUT", "INJ", "NA", "SUSP", "NOPROJ"}  # NOPROJ: dropped from the latest projections
 
 
 def norm_status(status) -> str:
@@ -29,31 +29,52 @@ def is_out(p) -> bool:
     return norm_status(p.get("inj_status")) in OUT
 
 
-def signal_multiplier(p: dict, sp: dict) -> tuple[float, list[str]]:
-    """Return (multiplier, list of signal buckets that fired)."""
-    mult, fired = 1.0, []
+SIGNAL_COLUMNS = ["m_pace", "m_blowout", "m_close", "m_b2b", "m_questionable", "m_contingent"]
+
+
+def signal_components(p: dict, sp: dict) -> dict:
+    """Each signal's multiplier on its own (1.0 when it did not fire)."""
+    c = {k: 1.0 for k in SIGNAL_COLUMNS}
     total = p.get("vegas_total")
     if total:
-        mult *= (float(total) / sp["vegas_baseline_total"]) ** sp["pace_exponent"]
+        c["m_pace"] = (float(total) / sp["vegas_baseline_total"]) ** sp["pace_exponent"]
     ml = p.get("fav_ml")
     minutes = float(p.get("minutes") or 0)
     if ml is not None:
         ml = abs(float(ml))
         if ml >= sp["blowout_ml"]:
-            if minutes >= sp["blowout_starter_minutes"]:
-                mult *= sp["blowout_starter_mult"]; fired.append("blowout_starter")
-            else:
-                mult *= sp["blowout_bench_mult"]; fired.append("blowout_bench")
+            c["m_blowout"] = sp["blowout_starter_mult"] if minutes >= sp["blowout_starter_minutes"] \
+                else sp["blowout_bench_mult"]
         elif ml <= sp["close_ml"]:
-            mult *= sp["close_game_mult"]; fired.append("close_game")
+            c["m_close"] = sp["close_game_mult"]
     if p.get("b2b"):
-        mult *= sp["b2b_mult"]; fired.append("b2b")
+        c["m_b2b"] = sp["b2b_mult"]
     if is_questionable(p):
         q = p.get("questionable_mult")
-        mult *= float(q) if q is not None else sp["questionable_default_mult"]
+        c["m_questionable"] = float(q) if q is not None else sp["questionable_default_mult"]
+    if p.get("contingent"):
+        c["m_contingent"] = sp["contingent_gpp_mult"]
+    return c
+
+
+def signal_multiplier(p: dict, sp: dict) -> tuple[float, list[str]]:
+    """Return (combined multiplier, list of signal buckets that fired)."""
+    c = signal_components(p, sp)
+    mult = 1.0
+    for v in c.values():
+        mult *= v
+    fired = []
+    if c["m_blowout"] != 1.0:
+        minutes = float(p.get("minutes") or 0)
+        fired.append("blowout_starter" if minutes >= sp["blowout_starter_minutes"] else "blowout_bench")
+    if c["m_close"] != 1.0:
+        fired.append("close_game")
+    if p.get("b2b"):
+        fired.append("b2b")
+    if is_questionable(p):
         fired.append("questionable")
     if p.get("contingent"):
-        mult *= sp["contingent_gpp_mult"]; fired.append("contingent")
+        fired.append("contingent")
     return mult, fired
 
 
@@ -62,6 +83,8 @@ def apply_signals(players: list[dict], params: dict) -> list[dict]:
     sp = params["signals"]
     for p in players:
         m, fired = signal_multiplier(p, sp)
+        for k, v in signal_components(p, sp).items():
+            p[k] = round(v, 5)
         p["signal_mult"] = round(m, 5)
         p["signals"] = fired
         p["proj_adj"] = round(float(p.get("proj_rg") or 0) * m, 3)

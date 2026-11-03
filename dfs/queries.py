@@ -16,6 +16,10 @@ def latest_run(cur, slate_id):
     return cur.fetchone()
 
 
+LINEUP_COLS = """id, mode, rank, salary, proj, ceil, own_sum, players, actual_score, entered, edited,
+                 settings, locks, excludes, cost_vs_unconstrained, built_at, params_version"""
+
+
 def slate_detail(conn, slate_id=None):
     with conn.cursor() as cur:
         if slate_id is None:
@@ -31,30 +35,37 @@ def slate_detail(conn, slate_id=None):
         run = latest_run(cur, slate_id)
         lineups = {}
         if run:
-            cur.execute("""SELECT mode, rank, salary, proj, ceil, own_sum, players, actual_score
-                           FROM lineups WHERE run_id=%s ORDER BY mode, rank""", (run["run_id"],))
+            cur.execute(f"SELECT {LINEUP_COLS} FROM lineups WHERE run_id=%s ORDER BY mode, rank", (run["run_id"],))
             for r in cur.fetchall():
                 lineups.setdefault(r["mode"], []).append(r)
-        cur.execute("""SELECT p.name, pl.team, pl.opp, pl.game, pl.pos, pl.salary, pl.minutes, pl.proj_rg,
-                              pl.proj_adj, pl.value, pl.value_grade, pl.own_pct, pl.own_estimated,
-                              pl.inj_status, pl.starter_consensus, pl.contingent, pl.signals
+        cur.execute(f"""SELECT {LINEUP_COLS} FROM lineups WHERE slate_id=%s AND entered
+                        AND run_id IS DISTINCT FROM %s ORDER BY built_at DESC""",
+                    (slate_id, run["run_id"] if run else None))
+        entered_elsewhere = cur.fetchall()
+        cur.execute("""SELECT pl.draftable_id AS key, p.name, pl.team, pl.opp, pl.game, pl.game_start, pl.pos,
+                              pl.salary, pl.minutes, pl.proj_rg, pl.proj_adj, pl.floor, pl.ceil, pl.value,
+                              pl.value_grade, pl.own_pct, pl.own_estimated, pl.inj_status, pl.starter_consensus,
+                              pl.contingent, pl.signals, pl.signal_mult
                        FROM pool pl JOIN players p ON p.id = pl.player_id
                        WHERE pl.slate_id=%s ORDER BY pl.proj_adj DESC NULLS LAST""", (slate_id,))
         pool = cur.fetchall()
     board = sorted([p for p in pool if p["value_grade"]],
                    key=lambda p: ("ABCD".index(p["value_grade"]), -(p["value"] or 0)))
-    watch = [p for p in pool if (p["inj_status"] or "") in ("Q", "GTD", "D") or p["contingent"]]
-    return {"slate": slate, "run": run, "lineups": lineups, "value_board": board, "watch": watch,
-            "pool_size": len(pool)}
+    watch = [p for p in pool if (p["inj_status"] or "") in ("Q", "GTD", "D", "O", "OUT", "NOPROJ") or p["contingent"]]
+    return {"slate": slate, "run": run, "lineups": lineups, "entered_other_runs": entered_elsewhere,
+            "value_board": board, "watch": watch, "pool": pool}
 
 
-def dk_upload_csv(conn, slate_id, mode="GPP") -> str:
+def dk_upload_csv(conn, slate_id, mode="GPP", entered_only=False) -> str:
     """DK bulk-upload format: header of roster slots, one row of draftable IDs per lineup."""
     with conn.cursor() as cur:
-        run = latest_run(cur, slate_id)
-        if not run:
-            return ",".join(SLOTS) + "\n"
-        cur.execute("SELECT players FROM lineups WHERE run_id=%s AND mode=%s ORDER BY rank",
-                    (run["run_id"], mode))
+        if entered_only:
+            cur.execute("SELECT players FROM lineups WHERE slate_id=%s AND entered ORDER BY mode, rank", (slate_id,))
+        else:
+            run = latest_run(cur, slate_id)
+            if not run:
+                return ",".join(SLOTS) + "\n"
+            cur.execute("SELECT players FROM lineups WHERE run_id=%s AND mode=%s ORDER BY rank",
+                        (run["run_id"], mode))
         rows = [",".join(str(p["draftable_id"]) for p in r["players"]) for r in cur.fetchall()]
     return "\n".join([",".join(SLOTS), *rows]) + "\n"

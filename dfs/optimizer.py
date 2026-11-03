@@ -29,7 +29,7 @@ def eligible_slots(pos: str) -> list[str]:
 
 @dataclass
 class Settings:
-    mode: str = "GPP"                 # GPP | CASH | OPTIMAL
+    mode: str = "GPP"                 # GPP | CASH | OPTIMAL | CONSENSUS
     ceil_weight: float = 0.40
     own_penalty: float = 0.12
     max_own_sum: float | None = None
@@ -44,15 +44,19 @@ class Settings:
 
     @classmethod
     def from_params(cls, params: dict, mode: str, **overrides) -> "Settings":
-        mp = params.get(mode, {}) if mode in ("GPP", "CASH") else {}
+        mp = params.get("GPP" if mode == "CONSENSUS" else mode, {}) if mode in ("GPP", "CASH", "CONSENSUS") else {}
         known = {f for f in cls.__dataclass_fields__}
         kw = {k: v for k, v in mp.items() if k in known}
-        kw.update(overrides)
+        kw.update({k: v for k, v in overrides.items() if k in known and v is not None})
         return cls(mode=mode, **kw)
 
 
 def objective_score(p: dict, s: Settings) -> float:
     proj = float(p.get("proj_adj") or 0)
+    if s.mode == "CONSENSUS":  # most-picked across the GPP set; GPP score breaks ties
+        gpp = proj + s.ceil_weight * (float(p.get("ceil") or proj) - proj) \
+            - s.own_penalty * float(p.get("own_pct") or 0)
+        return 1000.0 * float(p.get("exposure") or 0) + gpp
     if s.mode == "GPP":
         return proj + s.ceil_weight * (float(p.get("ceil") or proj) - proj) \
             - s.own_penalty * float(p.get("own_pct") or 0)
@@ -132,9 +136,12 @@ def summarize(lineup, s: Settings) -> dict:
         "floor": round(sum(float(p.get("floor") or 0) for p in ps), 2),
         "own_sum": round(sum(float(p.get("own_pct") or 0) for p in ps), 2),
         "objective": round(sum(objective_score(p, s) for p in ps), 3),
+        "objective_gpp": round(sum(objective_score(p, Settings(mode="GPP", ceil_weight=s.ceil_weight,
+                                                             own_penalty=s.own_penalty)) for p in ps), 3),
         "players": [{"slot": sl, "key": _key(p), "name": p["name"], "pos": p["pos"],
                      "team": p.get("team"), "salary": p["salary"],
                      "proj": p.get("proj_adj"), "own": p.get("own_pct"),
+                     "game": p.get("game"), "game_start": p.get("game_start"),
                      "draftable_id": p.get("draftable_id")} for p, sl in lineup],
     }
 

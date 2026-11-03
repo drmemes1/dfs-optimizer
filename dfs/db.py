@@ -54,7 +54,8 @@ def seed_params(conn) -> int | None:
         cur.execute("SELECT count(*) AS n FROM params")
         if cur.fetchone()["n"]:
             return None
-        cur.execute("INSERT INTO params(payload, reason, author) VALUES (%s, %s, 'human') RETURNING version",
+        cur.execute("INSERT INTO params(payload, reason, author, kind) VALUES (%s, %s, 'human', 'initial') "
+                    "RETURNING version",
                     (json.dumps(default_params()),
                      "Initial tuned values from graded backtests (see spec section 2c)"))
         v = cur.fetchone()["version"]

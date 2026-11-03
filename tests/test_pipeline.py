@@ -4,7 +4,7 @@ import random
 import pytest
 
 from dfs.params import default_params
-from dfs.pipeline import make_lineups, prepare
+from dfs.pipeline import build_all, prepare
 
 
 def synthetic_files(seed=1, n_games=4):
@@ -33,8 +33,9 @@ def test_prepare_and_lineups():
     dk, rg = synthetic_files()
     prep = prepare(dk, rg, params)
     assert len(prep["players"]) == 80 and not prep["merge"]["unmatched_dk"]
-    lus = make_lineups(prep["players"], params, n_gpp=5, n_cash=2)
+    lus, _, _ = build_all(prep["players"], params, n_gpp=5, n_cash=2)
     assert len(lus["GPP"]) == 5 and len(lus["CASH"]) == 2 and len(lus["OPTIMAL"]) == 1
+    assert len(lus["CONSENSUS"]) == 1
     assert all(lu["salary"] >= 49300 for lu in lus["GPP"])
     assert all(lu["own_sum"] <= 150 for lu in lus["GPP"])
 
