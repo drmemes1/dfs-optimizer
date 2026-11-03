@@ -51,5 +51,6 @@ def test_build_twice_upserts(monkeypatch):
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) AS n FROM pool WHERE slate_id=%s", (a["slate_id"],))
         assert cur.fetchone()["n"] == 80
-        cur.execute("SELECT count(DISTINCT run_id) AS n FROM lineups WHERE slate_id=%s", (a["slate_id"],))
+        cur.execute("SELECT count(DISTINCT run_id) AS n FROM lineups WHERE run_id IN (%s, %s)",
+                    (a["run_id"], b["run_id"]))
         assert cur.fetchone()["n"] == 2
