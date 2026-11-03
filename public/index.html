@@ -1,739 +1,465 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NBA DFS Optimizer</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            padding-top: 100px;
-        }
-
-        .nav {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: white;
-            padding: 15px 30px;
-            border-radius: 50px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            z-index: 1000;
-            display: flex;
-            gap: 20px;
-        }
-
-        .nav a {
-            text-decoration: none;
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-weight: 600;
-            color: #666;
-            transition: all 0.3s;
-        }
-
-        .nav a.active {
-            background: #667eea;
-            color: white;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        }
-
-        h1 { color: #333; margin-bottom: 10px; }
-        .subtitle { color: #666; margin-bottom: 30px; }
-        
-        .upload-area {
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            background: #fafbff;
-            transition: all 0.3s;
-            margin-bottom: 20px;
-        }
-
-        .upload-area:hover {
-            background: #f0f2ff;
-            border-color: #764ba2;
-        }
-
-        .upload-area.dragover {
-            background: #e8ebff;
-            border-color: #764ba2;
-            transform: scale(1.02);
-        }
-
-        input[type="file"] { display: none; }
-
-        .lock-section {
-            background: #fff8e1;
-            border: 2px solid #ffc107;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .lock-section h3 {
-            color: #f57c00;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .lock-inputs {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-
-        .lock-input-group {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .lock-input-group label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #666;
-            margin-bottom: 5px;
-        }
-
-        .lock-input-group input {
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        .lock-input-group input:focus {
-            outline: none;
-            border-color: #ffc107;
-        }
-
-        .lock-input-group.full-width {
-            grid-column: 1 / -1;
-        }
-
-        .lock-info {
-            margin-top: 15px;
-            padding: 10px;
-            background: white;
-            border-radius: 8px;
-            font-size: 13px;
-            color: #666;
-        }
-
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            width: 100%;
-            transition: transform 0.2s;
-        }
-
-        button:hover { transform: translateY(-2px); }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .result {
-            margin-top: 30px;
-            padding: 20px;
-            border-radius: 10px;
-            display: none;
-        }
-
-        .result.success {
-            background: #d4edda;
-            color: #155724;
-            border: 2px solid #c3e6cb;
-        }
-
-        .result.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 2px solid #f5c6cb;
-        }
-
-        .result.processing {
-            background: #fff3cd;
-            color: #856404;
-            border: 2px solid #ffeaa7;
-        }
-
-        .lineup-table {
-            margin-top: 20px;
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .lineup-table th {
-            background: #667eea;
-            color: white;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .lineup-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid #e0e0e0;
-            font-size: 14px;
-        }
-
-        .lineup-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .lineup-table tr:hover {
-            background: #f8f9fa;
-        }
-
-        .locked-row {
-            background: #fff8e1 !important;
-        }
-
-        .locked-badge {
-            display: inline-block;
-            background: #ffc107;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-left: 8px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .stat-card {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #e0e0e0;
-        }
-
-        .stat-label {
-            font-size: 11px;
-            color: #666;
-            font-weight: 600;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-        }
-
-        .stat-value {
-            font-size: 20px;
-            font-weight: bold;
-            color: #667eea;
-        }
-
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .locked-player-display {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background: #e8f5e9;
-            border-left: 4px solid #4caf50;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #2e7d32;
-        }
-
-        .recommendations {
-            margin-top: 20px;
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-        }
-
-        .recommendations h4 {
-            color: #667eea;
-            margin-bottom: 10px;
-            font-size: 14px;
-        }
-
-        .recommendations ul {
-            list-style: none;
-            padding: 0;
-        }
-
-        .recommendations li {
-            padding: 5px 0;
-            font-size: 13px;
-            color: #666;
-        }
-
-        .poll-status {
-            font-size: 12px;
-            color: #666;
-            margin-top: 10px;
-            text-align: center;
-        }
-
-        .preview-box {
-            margin-top: 10px;
-            padding: 12px;
-            background: white;
-            border-radius: 8px;
-            border: 2px solid #e0e0e0;
-            font-size: 13px;
-            display: none;
-        }
-
-        .preview-box.active {
-            display: block;
-        }
-
-        .preview-label {
-            font-weight: 600;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-
-        .preview-content {
-            color: #333;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NBA DFS Optimizer</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
+    --accent: #2c5fd4; --accent-ink: #ffffff; --warn: #a15c00; --warn-bg: #fbf0dc; --bad: #b3261e; --bad-bg: #fbe6e4;
+    --good: #1f7a3d;
+    --gA: #1f7a3d; --gA-bg: #e3f3e8; --gB: #2c5fd4; --gB-bg: #e6edfb;
+    --gC: #9a6400; --gC-bg: #fbf0dc; --gD: #6b6b66; --gD-bg: #efeeea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151514; --panel: #1e1e1c; --ink: #ecebe6; --muted: #a3a29b; --line: #34332f;
+      --accent: #7aa2ff; --accent-ink: #0f1a33; --warn: #e3a54a; --warn-bg: #3a2c12; --bad: #ff8a80; --bad-bg: #3d1d1a;
+      --good: #6fd38f;
+      --gA: #6fd38f; --gA-bg: #183323; --gB: #8fb0ff; --gB-bg: #1c2742;
+      --gC: #e9b25c; --gC-bg: #3a2c12; --gD: #a3a29b; --gD-bg: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  main, section { min-width: 0; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  label { min-width: 0; max-width: 100%; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input[type=number] { width: 80px; }
+  input[type=file] { max-width: 100%; }
+  input, select, button { font: inherit; color: var(--ink); background: var(--bg);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.sm { padding: 2px 7px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: progress; }
+  button[aria-pressed=true].lock { background: var(--gA-bg); color: var(--good); border-color: var(--good); }
+  button[aria-pressed=true].excl { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+  details > summary { cursor: pointer; color: var(--accent); margin: 10px 0 6px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tabs button[aria-pressed=true] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; }
+  .lineups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+  .card.entered { border-color: var(--good); box-shadow: inset 3px 0 0 var(--good); }
+  .card .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .card td { padding: 3px 6px; }
+  .card tr.flag td { background: var(--bad-bg); }
+  .card tr.locked td:first-child::after { content: " 🔒"; }
+  .card td.subs { font-size: 12px; padding: 4px 6px 8px; background: var(--bad-bg); white-space: normal; }
+  .subs button { margin: 2px 4px 2px 0; }
+  .grade { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; border-radius: 4px; padding: 0 5px; }
+  .gA { color: var(--gA); background: var(--gA-bg); } .gB { color: var(--gB); background: var(--gB-bg); }
+  .gC { color: var(--gC); background: var(--gC-bg); } .gD { color: var(--gD); background: var(--gD-bg); }
+  .warn { color: var(--warn); } .bad { color: var(--bad); } .good { color: var(--good); }
+  .msg { padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+  .msg.alert { background: var(--warn-bg); border-color: var(--warn); }
+  .games { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .game { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+  .game.soon { border-color: var(--warn); color: var(--warn); }
+  .game.locked { color: var(--muted); text-decoration: line-through; }
+  .cons-grid { display: grid; grid-template-columns: auto repeat(2, 90px); gap: 4px 10px; align-items: center; font-size: 12px; }
+  .two { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two { grid-template-columns: 3fr 2fr; } }
+  @media (max-width: 480px) { .card td.team { display: none; } }
+</style>
 </head>
 <body>
-    <div class="nav">
-        <a href="/" class="active">🏀 NBA</a>
-        <a href="/nfl.html">🏈 NFL</a>
-        <a href="/dashboard.html">📊 Dashboard</a>
+<header>
+  <h1>NBA DFS Optimizer <span class="muted" style="font-weight:400">· DraftKings Classic</span></h1>
+  <label>Slate <select id="slatePick"><option value="">Latest</option></select></label>
+</header>
+<main>
+  <section>
+    <h2>Build lineups</h2>
+    <p class="muted" style="margin:0 0 10px">Upload DraftKings' <b>DKSalaries.csv</b> (contest page → Export to CSV) and your
+      <b>RotoGrinders</b> projections export. Re-uploading later in the day updates the same slate.</p>
+    <form id="buildForm" class="row">
+      <label>DKSalaries.csv <input type="file" id="dkFile" accept=".csv,text/csv" required></label>
+      <label>RotoGrinders export <input type="file" id="rgFile" accept=".csv,text/csv" required></label>
+      <label>GPP lineups <input type="number" id="nGpp" value="10" min="1" max="40"></label>
+      <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
+      <button class="primary" id="buildBtn" type="submit">Build</button>
+    </form>
+    <details id="contestDetails">
+      <summary>Contest these lineups are for</summary>
+      <div class="row">
+        <label>Contest name <input id="cName" placeholder="NBA $20K Shot"></label>
+        <label>Entry fee $ <input type="number" id="cFee" min="0" step="any"></label>
+        <label>Field size <input type="number" id="cField" min="1"></label>
+        <label>Payouts <select id="cTop"><option value="">–</option><option value="top_heavy">Top-heavy GPP</option>
+          <option value="flat">Flatter GPP</option><option value="double_up">Double-up</option><option value="fifty_fifty">50/50</option></select></label>
+        <label>Entry type <select id="cMode"><option value="">–</option><option value="SE">Single entry</option><option value="ME">Multi-entry</option></select></label>
+        <label>Max entries <input type="number" id="cMax" min="1"></label>
+      </div>
+    </details>
+    <details id="consDetails">
+      <summary>Constraints (defaults from params v<span id="pv">–</span>)</summary>
+      <div class="cons-grid" id="consGrid"></div>
+      <p class="muted small" style="margin:6px 0 0">Changes apply to the next Build or Rebuild only; the stored params are not edited.
+        Ownership knobs are measured values; change them only with a graded result behind it.</p>
+    </details>
+    <div id="buildMsg" style="margin-top:10px"></div>
+  </section>
+
+  <section id="slateSec" hidden>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 id="slateTitle" style="margin:0"></h2>
+      <div class="row">
+        <button type="button" id="checkBtn">Re-check inactives</button>
+        <a id="exMode"><button type="button" id="exModeBtn">DK upload CSV</button></a>
+        <a id="exEntered"><button type="button">DK CSV · entered only</button></a>
+      </div>
     </div>
-
-    <div class="container">
-        <h1>🏀 NBA DFS Optimizer</h1>
-        <p class="subtitle">Upload your DraftKings CSV for optimized lineups</p>
-
-        <div class="lock-section">
-            <h3>🔒 Lock / 🚫 Exclude Players</h3>
-            <div class="lock-inputs">
-                <div class="lock-input-group">
-                    <label>Lock Player (Full Name)</label>
-                    <input 
-                        type="text" 
-                        id="lockedPlayerName" 
-                        placeholder="e.g., Stephen Curry"
-                        autocomplete="off"
-                    />
-                </div>
-                <div class="lock-input-group">
-                    <label>Lock Max Salary (Optional)</label>
-                    <input 
-                        type="number" 
-                        id="lockedPlayerSalary" 
-                        placeholder="Max salary"
-                        min="3000"
-                        max="12000"
-                    />
-                </div>
-                <div class="lock-input-group full-width">
-                    <label>Exclude Players (Full names, comma-separated)</label>
-                    <input 
-                        type="text" 
-                        id="excludedPlayers" 
-                        placeholder="e.g., LeBron James, Nikola Jokic, Luka Doncic"
-                        autocomplete="off"
-                    />
-                </div>
-            </div>
-            <div class="lock-info">
-                💡 <strong>How it works:</strong> Enter a player's full name (e.g., "Stephen Curry") to guarantee them in your lineup.
-                Use the exclude box to remove multiple players by their full names, separated by commas.
-            </div>
-            <div class="preview-box" id="previewBox">
-                <div class="preview-label">Current Settings:</div>
-                <div class="preview-content" id="previewContent"></div>
-            </div>
-        </div>
-
-        <div class="upload-area" id="uploadArea">
-            <div style="font-size: 48px; margin-bottom: 15px;">📊</div>
-            <h3>Upload DraftKings CSV</h3>
-            <p style="color: #666; margin-top: 10px;">Click to browse or drag & drop</p>
-            <input type="file" id="fileInput" accept=".csv">
-        </div>
-
-        <button id="optimizeBtn" disabled>🚀 Optimize Lineup</button>
-        <div class="result" id="result"></div>
+    <div class="games" id="games"></div>
+    <div id="jobStatus" class="small muted" style="margin:-4px 0 10px"></div>
+    <div id="recheck" hidden class="msg" style="margin-bottom:10px">
+      <div class="row">
+        <button class="primary" type="button" id="refreshBtn">Pull latest lineups &amp; injuries, then check</button>
+        <label>New RotoGrinders file (optional) <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
+        <label>New DKSalaries.csv (optional) <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
+        <button type="button" id="checkOnlyBtn">Check saved statuses only</button>
+      </div>
+      <div id="checkMsg" style="margin-top:8px"></div>
     </div>
+    <div id="costMsg"></div>
+    <div class="tabs" id="modeTabs"></div>
+    <div class="lineups" id="lineups"></div>
+  </section>
 
-    <script>
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const optimizeBtn = document.getElementById('optimizeBtn');
-        const result = document.getElementById('result');
-        const lockedPlayerName = document.getElementById('lockedPlayerName');
-        const lockedPlayerSalary = document.getElementById('lockedPlayerSalary');
-        const excludedPlayersInput = document.getElementById('excludedPlayers');
-        const previewBox = document.getElementById('previewBox');
-        const previewContent = document.getElementById('previewContent');
-        
-        let selectedFile = null;
-        let pollingInterval = null;
-        let pollAttempts = 0;
-        const MAX_POLL_ATTEMPTS = 60;
+  <section>
+    <h2>Contest results</h2>
+    <p class="muted small" style="margin:0 0 8px">After the slate, open the contest on DraftKings and download the standings CSV
+      (contest-standings-<i>id</i>.csv). It records actual ownership, the full field's scores, and your finishes. Your entries
+      are matched to the lineups saved here and graded.</p>
+    <div class="row">
+      <label>Standings CSV <input type="file" id="stFile" accept=".csv,text/csv"></label>
+      <label>Your DK username <input id="stUser" placeholder="drmemes1"></label>
+      <label>Contest name <input id="stName"></label>
+      <label>Entry fee $ <input type="number" id="stFee" step="any"></label>
+      <label>Prize pool $ <input type="number" id="stPool" step="any"></label>
+      <label>Places paid <input type="number" id="stPaid"></label>
+      <button class="primary" type="button" id="stBtn">Import results</button>
+    </div>
+    <div id="stMsg" style="margin-top:8px"></div>
+  </section>
 
-        // Update preview when inputs change
-        lockedPlayerName.addEventListener('input', updatePreview);
-        lockedPlayerSalary.addEventListener('input', updatePreview);
-        excludedPlayersInput.addEventListener('input', updatePreview);
+  <section id="poolSec" hidden>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">Player pool · lock / exclude</h2>
+      <div class="row">
+        <input type="search" id="poolSearch" placeholder="Find player or team">
+        <span class="muted small" id="lockCount"></span>
+        <button type="button" id="clearLE">Clear</button>
+        <button class="primary" type="button" id="rebuildBtn">Rebuild</button>
+      </div>
+    </div>
+    <p class="muted small" style="margin:6px 0 8px">Rebuild uses the stored pool with your locks, excludes and constraints, and shows what the
+      top lineup gives up in projection versus the unconstrained build.</p>
+    <div class="scroll" style="max-height:420px;overflow-y:auto"><table id="poolTable"></table></div>
+  </section>
 
-        function updatePreview() {
-            const lockName = lockedPlayerName.value.trim();
-            const lockSalary = lockedPlayerSalary.value.trim();
-            const excludeNames = excludedPlayersInput.value.trim();
+  <div class="two" id="lowerSec" hidden>
+    <section>
+      <h2>Value board <span class="muted" style="font-weight:400">· sub-$5,500, 12+ min</span></h2>
+      <p class="muted small" style="margin:0 0 8px">Boxes: consensus starter · 24+ projected minutes · value 5.0+.
+        A = all three, B = two, C = one, D = lottery ticket. <span class="warn">Starting lineups are not connected yet:
+        check every cheap play's role by hand.</span></p>
+      <div class="scroll"><table id="board"></table></div>
+    </section>
+    <section>
+      <h2>Injury / questionable watch</h2>
+      <div class="scroll"><table id="watch"></table></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 1) => (v === null || v === undefined || v === "") ? "–" : Number(v).toFixed(d);
+const money = (v) => "$" + Number(v).toLocaleString();
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const MODES = [["GPP", "GPP"], ["CASH", "Cash"], ["CONSENSUS", "Consensus"], ["OPTIMAL", "Max projection"]];
+const CONS = [["min_salary", "Min salary"], ["max_from_team", "Max from team"], ["max_per_game", "Max from game"],
+              ["max_own_sum", "Max ownership sum"], ["min_uniques", "Min uniques"], ["ceil_weight", "Ceiling weight"],
+              ["own_penalty", "Ownership penalty"]];
+let current = null, mode = "GPP", params = null, checkResult = null;
+let locks = new Set(), excludes = new Set();
 
-            let previewText = '';
-            
-            if (lockName) {
-                previewText += `🔒 <strong>Locked:</strong> ${lockName}`;
-                if (lockSalary) {
-                    previewText += ` (max $${parseInt(lockSalary).toLocaleString()})`;
-                }
-            }
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({ ok: false, error: "Bad response (" + r.status + ")" }));
+  if (!r.ok || j.ok === false) throw new Error(j.error + (j.detail ? ": " + j.detail : ""));
+  return j;
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-            if (excludeNames) {
-                const excludeList = excludeNames.split(',').map(s => s.trim()).filter(Boolean);
-                if (previewText) previewText += '<br>';
-                previewText += `❌ <strong>Excluded:</strong> ${excludeList.join(', ')}`;
-            }
+async function fileB64(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let s = ""; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 
-            if (previewText) {
-                previewContent.innerHTML = previewText;
-                previewBox.classList.add('active');
-            } else {
-                previewBox.classList.remove('active');
-            }
-        }
+async function loadParams() {
+  try {
+    const j = await api("/api/slate?params=1"); params = j.params; $("pv").textContent = j.version;
+    const cell = (m, k) => {
+      const v = params[m]?.[k];
+      return `<input type="number" step="any" data-m="${m}" data-k="${k}" value="${v ?? ""}" placeholder="${v ?? "–"}">`;
+    };
+    const gppOnly = ["max_own_sum", "ceil_weight", "own_penalty"];
+    $("consGrid").innerHTML = '<span></span><b>GPP</b><b>Cash</b>' + CONS.map(([k, label]) =>
+      `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="muted">n/a</span>' : cell("CASH", k)}`).join("");
+  } catch (e) { /* db not ready */ }
+}
 
-        uploadArea.addEventListener('click', () => fileInput.click());
+function contestCtx() {
+  const c = { name: $("cName").value, entry_fee: $("cFee").value, field_size: $("cField").value,
+              top_heaviness: $("cTop").value, entry_mode: $("cMode").value, max_entries: $("cMax").value };
+  return Object.values(c).some(v => v !== "") ? c : null;
+}
 
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
+function overrides() {
+  const o = { GPP: {}, CASH: {} };
+  $("consGrid").querySelectorAll("input").forEach(i => {
+    if (i.value !== "" && params && String(params[i.dataset.m]?.[i.dataset.k]) !== i.value) o[i.dataset.m][i.dataset.k] = +i.value;
+  });
+  return o;
+}
 
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
+async function loadSlates(selectId) {
+  try {
+    const j = await api("/api/slate?list=1");
+    $("slatePick").innerHTML = '<option value="">Latest</option>' + j.slates.map(s =>
+      `<option value="${s.id}">${s.date} · ${s.n_games} games</option>`).join("");
+    if (selectId) $("slatePick").value = String(selectId);
+  } catch (e) { /* none yet */ }
+}
 
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) {
-                handleFile(e.dataTransfer.files[0]);
-            }
-        });
+async function loadSlate(id) {
+  try {
+    current = await api("/api/slate" + (id ? "?id=" + id : ""));
+    const lu = Object.values(current.lineups)[0]?.[0];
+    locks = new Set((lu?.locks || []).map(Number)); excludes = new Set((lu?.excludes || []).map(Number));
+    checkResult = null; render();
+    try {   // show late-scratch flags without a click (the scheduler refreshes statuses through the evening)
+      const c = await api(`/api/slate?id=${current.slate.id}&check=1`);
+      if (c.flags.length) { $("recheck").hidden = false; showCheck(c); }
+    } catch (e) { /* non-fatal */ }
+  } catch (e) { ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = true); }
+}
 
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
-        });
+function tipInfo(start) {
+  const ms = new Date(start) - Date.now();
+  if (ms <= 0) return { locked: true, text: "locked" };
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  return { locked: false, soon: ms < 30 * 60000, text: d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m` };
+}
 
-        function handleFile(file) {
-            if (!file.name.endsWith('.csv')) {
-                showResult('error', '<h3>❌ Invalid File</h3><p>Please upload a CSV file from DraftKings</p>');
-                return;
-            }
+function renderGames() {
+  const s = current.slate;
+  $("games").innerHTML = (s.game_list || []).map(g => {
+    const t = tipInfo(g.start), local = new Date(g.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return `<span class="game ${t.locked ? "locked" : t.soon ? "soon" : ""}">${esc(g.game)} · ${local} · ${t.text}</span>`;
+  }).join("");
+}
 
-            selectedFile = file;
-            uploadArea.innerHTML = `
-                <div style="font-size: 48px; margin-bottom: 15px;">✅</div>
-                <h3>${file.name}</h3>
-                <p style="color: #666; margin-top: 10px;">Ready to optimize!</p>
-            `;
-            optimizeBtn.disabled = false;
-            result.style.display = 'none';
-        }
+function flagsFor(lineupId) {
+  return (checkResult?.flags || []).filter(f => f.lineup_id === lineupId);
+}
 
-        async function pollForResults(jobId) {
-            pollAttempts++;
+function lineupCard(lu) {
+  const flags = flagsFor(lu.id), fk = new Map(flags.map(f => [f.key, f]));
+  const rows = lu.players.map(p => {
+    const f = fk.get(p.key), locked = p.game_start && new Date(p.game_start) <= Date.now();
+    const subs = f && !f.locked && f.suggestions.length ? `<tr><td colspan="7" class="subs">Swap ${esc(p.name)} (${esc(f.status)}) for:
+        ${f.suggestions.map(s => `<button class="sm" data-swap="${lu.id}:${p.key}:${s.key}">${esc(s.name)} ${money(s.salary)} · ${fmt(s.proj)} (${s.proj_delta >= 0 ? "+" : ""}${fmt(s.proj_delta)})</button>`).join("")}</td></tr>`
+      : f && f.locked ? `<tr><td colspan="7" class="subs">${esc(p.name)} is ${esc(f.status)} but his game has tipped; DK has him locked.</td></tr>` : "";
+    return `<tr class="${f ? "flag" : ""} ${locked ? "locked" : ""}"><td class="muted">${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
+      <td class="muted team">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj)}</td>
+      <td class="n muted">${fmt(p.own, 1)}%</td>${p.exposure !== undefined ? `<td class="n muted">${Math.round(p.exposure * 100)}%</td>` : "<td></td>"}</tr>${subs}`;
+  }).join("");
+  return `<div class="card ${lu.entered ? "entered" : ""}">
+    <div class="meta"><b style="color:var(--ink)">${lu.mode === "CONSENSUS" ? "Consensus" : "#" + lu.rank}</b><span>${money(lu.salary)}</span>
+      <span>proj ${fmt(lu.proj)}</span><span>ceil ${fmt(lu.ceil)}</span><span>own ${fmt(lu.own_sum, 0)}%</span>
+      ${lu.edited ? '<span class="warn">edited</span>' : ""}
+      ${lu.actual_score != null ? `<span>actual <b style="color:var(--ink)">${fmt(lu.actual_score)}</b></span>` : ""}
+      <label style="display:flex;gap:4px;align-items:center;margin-left:auto;color:var(--ink)"><input type="checkbox" data-entered="${lu.id}" ${lu.entered ? "checked" : ""}> entered</label></div>
+    ${lu.mode === "CONSENSUS" ? '<div class="muted small">Last column: share of GPP lineups using the player.</div>' : ""}
+    <table>${rows}</table></div>`;
+}
 
-            if (pollAttempts > MAX_POLL_ATTEMPTS) {
-                if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                    pollingInterval = null;
-                }
-                showResult('error', `
-                    <h3>⏱️ Timeout</h3>
-                    <p>Optimization is taking longer than expected. Please check SwarmNode for results:</p>
-                    <p style="margin-top: 10px;"><a href="https://app.swarmnode.ai" target="_blank" style="color: #667eea;">View in SwarmNode →</a></p>
-                `);
-                optimizeBtn.disabled = false;
-                optimizeBtn.textContent = '🚀 Optimize Lineup';
-                return;
-            }
+function render() {
+  const s = current.slate;
+  ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = false);
+  $("slateTitle").innerHTML = `${esc(s.date)} · ${s.n_games} games <span class="muted small" style="font-weight:400">built ${current.run ? new Date(current.run.built_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"} · params v${current.run?.params_version ?? "–"}</span>`;
+  renderGames();
+  const snap = (current.job_runs || []).find(r => r.job === "snapshot");
+  if (!snap) $("jobStatus").innerHTML = '<span class="warn">Automatic lineup checks haven\'t run yet (scheduler not set up).</span>';
+  else {
+    const ago = Math.round((Date.now() - new Date(snap.started_at)) / 60000);
+    const errs = Object.entries(snap.errors || {}).map(([k, v]) => k + ": " + v).join("; ");
+    $("jobStatus").innerHTML = `Last automatic lineup check ${ago < 90 ? ago + " min" : Math.round(ago / 60) + " h"} ago ` +
+      (snap.ok ? '<span class="good">✓</span>' : `<span class="bad">✗ ${esc(errs)}</span>`) +
+      (ago > 45 && (current.slate.game_list || []).some(g => new Date(g.start) > Date.now()) ? ' <span class="warn">— overdue; check the scheduler</span>' : "");
+  }
+  const modes = MODES.filter(([m]) => current.lineups[m]);
+  if (!modes.some(([m]) => m === mode)) mode = modes[0]?.[0] || "GPP";
+  $("modeTabs").innerHTML = modes.map(([m, label]) =>
+    `<button type="button" aria-pressed="${m === mode}" data-m="${m}">${label} (${current.lineups[m].length})</button>`).join("");
+  $("modeTabs").querySelectorAll("button").forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+  $("exMode").href = `/api/slate?id=${s.id}&export=${mode}`;
+  $("exModeBtn").textContent = `DK upload CSV · ${MODES.find(([m]) => m === mode)?.[1] || mode}`;
+  $("exEntered").href = `/api/slate?id=${s.id}&export=ENTERED`;
 
-            try {
-                const response = await fetch(`/api/results?job_id=${jobId}`);
-                const data = await response.json();
+  const cost = current.lineups[mode]?.[0]?.cost_vs_unconstrained;
+  const lk = current.lineups[mode]?.[0];
+  $("costMsg").innerHTML = cost ? `<div class="msg alert" style="margin-bottom:10px">Locks/excludes cost the top ${esc(mode)} lineup
+      <b>${cost.proj >= 0 ? "+" : ""}${fmt(cost.proj)} proj</b> (objective ${cost.objective >= 0 ? "+" : ""}${fmt(cost.objective)}) versus the
+      unconstrained build (${fmt(cost.unconstrained_proj)}). Locked ${lk.locks.length}, excluded ${lk.excludes.length}.</div>` : "";
 
-                console.log('Poll result:', data);
+  const entered = (current.entered_other_runs || []).filter(l => l.mode === mode);
+  $("lineups").innerHTML = (current.lineups[mode] || []).map(lineupCard).join("") +
+    (entered.length ? `<div class="muted small" style="grid-column:1/-1">Entered from earlier builds:</div>` + entered.map(lineupCard).join("") : "") ||
+    '<p class="muted">No lineups for this mode.</p>';
+  $("lineups").querySelectorAll("[data-entered]").forEach(cb => cb.onchange = async () => {
+    try { await post("/api/lineup", { id: +cb.dataset.entered, action: "entered", value: cb.checked }); await loadSlate(s.id); }
+    catch (e) { alert(e.message); cb.checked = !cb.checked; }
+  });
+  $("lineups").querySelectorAll("[data-swap]").forEach(b => b.onclick = async () => {
+    const [id, out, inn] = b.dataset.swap.split(":").map(Number);
+    b.disabled = true;
+    try { await post("/api/lineup", { id, action: "swap", out_key: out, in_key: inn });
+          const keep = checkResult; await loadSlate(s.id); checkResult = keep && (await api(`/api/slate?id=${s.id}&check=1`)); render(); }
+    catch (e) { alert(e.message); b.disabled = false; }
+  });
+  renderPool(); renderLower();
+}
 
-                const statusEl = document.querySelector('.poll-status');
-                if (statusEl) {
-                    statusEl.textContent = `Checking results... (attempt ${pollAttempts}/${MAX_POLL_ATTEMPTS})`;
-                }
+function renderPool() {
+  const q = $("poolSearch").value.trim().toLowerCase();
+  const rows = current.pool.filter(p => !q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q);
+  $("lockCount").textContent = `${locks.size} locked · ${excludes.size} excluded`;
+  $("poolTable").innerHTML = `<tr><th></th><th>Player</th><th>Pos</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
+      <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
+    rows.slice(0, 300).map(p => `<tr><td><button class="sm lock" aria-pressed="${locks.has(p.key)}" data-lock="${p.key}">Lock</button>
+        <button class="sm excl" aria-pressed="${excludes.has(p.key)}" data-excl="${p.key}">Exclude</button></td>
+      <td>${esc(p.name)}</td><td class="muted">${esc(p.pos)}</td><td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
+      <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
+      <td class="n muted">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
+  $("poolTable").querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {
+    const k = +b.dataset.lock; locks.has(k) ? locks.delete(k) : (locks.add(k), excludes.delete(k)); renderPool(); });
+  $("poolTable").querySelectorAll("[data-excl]").forEach(b => b.onclick = () => {
+    const k = +b.dataset.excl; excludes.has(k) ? excludes.delete(k) : (excludes.add(k), locks.delete(k)); renderPool(); });
+}
 
-                if (data.success && data.status === 'completed' && data.lineup) {
-                    if (pollingInterval) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                    }
-                    displayLineup(data);
-                } else if (data.status === 'failed' || (data.success === false && data.status !== 'processing')) {
-                    if (pollingInterval) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                    }
-                    showResult('error', `<h3>❌ Optimization Failed</h3><p>${data.error || 'Unknown error'}</p>`);
-                    optimizeBtn.disabled = false;
-                    optimizeBtn.textContent = '🚀 Optimize Lineup';
-                }
+function renderLower() {
+  $("board").innerHTML = `<tr><th>Grade</th><th>Player</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
+      <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th></tr>` +
+    current.value_board.map(p => `<tr><td><span class="grade g${p.value_grade}">${p.value_grade}</span></td>
+      <td>${esc(p.name)}${p.inj_status ? ` <span class="warn">${esc(p.inj_status)}</span>` : ""}</td>
+      <td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.minutes, 0)}</td>
+      <td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
+      <td class="n muted">${fmt(p.own_pct)}%${p.own_estimated ? "*" : ""}</td></tr>`).join("");
+  $("watch").innerHTML = current.watch.length ? `<tr><th>Player</th><th>Team</th><th>Status</th><th class="n">Salary</th><th class="n">Proj (adj)</th></tr>` +
+    current.watch.map(p => `<tr><td>${esc(p.name)}</td><td class="muted">${esc(p.team)}</td>
+      <td class="${p.contingent || ["O", "OUT", "NOPROJ"].includes(p.inj_status) ? "bad" : "warn"}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td>
+      <td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj_adj)}</td></tr>`).join("")
+    : '<tr><td class="muted">Nobody flagged.</td></tr>';
+}
 
-            } catch (error) {
-                console.error('Polling error:', error);
-                
-                if (pollAttempts >= MAX_POLL_ATTEMPTS) {
-                    if (pollingInterval) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                    }
-                    showResult('error', `<h3>❌ Error</h3><p>Failed to fetch results: ${error.message}</p>`);
-                    optimizeBtn.disabled = false;
-                    optimizeBtn.textContent = '🚀 Optimize Lineup';
-                }
-            }
-        }
+function showCheck(res) {
+  checkResult = res;
+  const live = res.flags.filter(f => !f.locked);
+  $("checkMsg").innerHTML = res.flags.length
+    ? `<span class="bad"><b>${res.flags.length}</b> flagged spot${res.flags.length > 1 ? "s" : ""}</span> in ${res.checked_lineups} lineups
+       (${live.length} still swappable). Swap buttons are under each flagged player.`
+    : `<span class="good">All clear</span>: nobody in ${res.checked_lineups} saved lineups is Out, Doubtful, Questionable or missing a projection.`;
+  render();
+}
 
-        function displayLineup(data) {
-            const lineup = data.lineup || [];
-            const stats = data.stats || {};
-            const recommendations = data.recommendations || [];
-            const lockedPlayer = data.locked_player_used;
-            const excludedPlayers = data.excluded_players || [];
+$("slatePick").onchange = (e) => loadSlate(e.target.value);
+$("poolSearch").oninput = () => renderPool();
+$("clearLE").onclick = () => { locks.clear(); excludes.clear(); renderPool(); };
+$("checkBtn").onclick = () => { $("recheck").hidden = !$("recheck").hidden; };
+$("checkOnlyBtn").onclick = async () => {
+  try { showCheck(await api(`/api/slate?id=${current.slate.id}&check=1`)); } catch (e) { $("checkMsg").textContent = e.message; }
+};
+$("refreshBtn").onclick = async () => {
+  const rg = $("rgFresh").files[0], dk = $("dkFresh").files[0];
+  $("refreshBtn").disabled = true; $("checkMsg").textContent = "Pulling the latest lineups and injury tags…";
+  try {
+    const j = await post("/api/build", { action: "refresh", slate_id: current.slate.id,
+      ...(rg ? { rg_b64: await fileB64(rg), rg_name: rg.name } : {}),
+      ...(dk ? { dk_b64: await fileB64(dk), dk_name: dk.name } : {}) });
+    await loadSlate(j.slate_id); showCheck(j.check);
+  } catch (e) { $("checkMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally { $("refreshBtn").disabled = false; }
+};
+$("rebuildBtn").onclick = async () => {
+  const b = $("rebuildBtn"); b.disabled = true; b.textContent = "Rebuilding…";
+  try {
+    await post("/api/build", { action: "rebuild", slate_id: current.slate.id, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value,
+      overrides: overrides(), locks: [...locks], excludes: [...excludes], contest: contestCtx() });
+    await loadSlate(current.slate.id); $("slateSec").scrollIntoView({ behavior: "smooth" });
+  } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = "Rebuild"; }
+};
 
-            let html = '<h3>✅ Optimal Lineup Generated!</h3>';
+$("buildForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = $("buildBtn"), msg = $("buildMsg"), dk = $("dkFile").files[0], rg = $("rgFile").files[0];
+  btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
+  try {
+    const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, rg_b64: await fileB64(rg), rg_name: rg.name,
+      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx() });
+    const w = j.warnings, notes = [];
+    if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
+    if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
+    if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name + initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);
+    if (w.unmatched_lineup_names?.length) notes.push(`<span class="bad">${w.unmatched_lineup_names.length} names on the lineup pages didn't match anyone in the DK pool:</span> ${esc(w.unmatched_lineup_names.slice(0, 12).map(u => u.name + " (" + u.team + ", " + u.source + ")").join(", "))}`);
+    for (const [src, err] of Object.entries(w.lineup_source_errors || {})) notes.push(`<span class="bad">${esc(src)} lineups failed:</span> ${esc(err)}`);
+    if (w.own_estimated) notes.push(`<span class="warn">${w.own_estimated} ownership values estimated</span> (not yet published).`);
+    notes.push(`<span class="warn">${esc(w.starters_source)}.</span>`);
+    msg.innerHTML = `<div class="msg">Built ${j.players} players across ${j.games.length} games · params v${j.params_version}.<br>${notes.join("<br>")}</div>`;
+    await loadSlates(j.slate_id); await loadSlate(j.slate_id);
+  } catch (err) { msg.innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
+  finally { btn.disabled = false; }
+};
 
-            // Show lock/exclude summary
-            if (lockedPlayer || excludedPlayers.length > 0) {
-                html += '<div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 13px;">';
-                if (lockedPlayer) {
-                    html += `<div>🔒 <strong>Locked player:</strong> ${lockedPlayer}</div>`;
-                }
-                if (excludedPlayers.length > 0) {
-                    html += `<div style="margin-top: 5px;">❌ <strong>Excluded:</strong> ${excludedPlayers.join(', ')}</div>`;
-                }
-                html += '</div>';
-            }
+try { $("stUser").value = localStorage.getItem("dkUser") || ""; } catch (e) { /* storage unavailable */ }
+$("stBtn").onclick = async () => {
+  const f = $("stFile").files[0];
+  if (!f) { $("stMsg").textContent = "Choose the standings CSV first."; return; }
+  try { localStorage.setItem("dkUser", $("stUser").value.trim()); } catch (e) { /* ignore */ }
+  $("stBtn").disabled = true; $("stMsg").textContent = "Importing…";
+  try {
+    const j = await post("/api/build", { action: "import_contest", csv_b64: await fileB64(f), filename: f.name,
+      meta: { dk_username: $("stUser").value.trim(), name: $("stName").value, entry_fee: $("stFee").value || null,
+              prize_pool: $("stPool").value || null, places_paid: $("stPaid").value || null } });
+    $("stMsg").innerHTML = `<div class="msg">Contest ${j.contest_id}: ${j.entries.toLocaleString()} entries · winning score ${fmt(j.winning_score)}
+      ${j.min_cash_score != null ? "· min-cash " + fmt(j.min_cash_score) : ""} · your entries ${j.mine} (${j.matched_to_saved_lineups} matched to saved lineups)
+      · ownership for ${j.ownership_rows} players.${j.warnings.length ? "<br><span class='warn'>" + esc(j.warnings.join(" · ")) + "</span>" : ""}</div>`;
+    if (j.slate_id) await loadSlate(j.slate_id);
+  } catch (e) { $("stMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally { $("stBtn").disabled = false; }
+};
 
-            html += '<div class="stats-grid">';
-            html += `<div class="stat-card">
-                <div class="stat-label">Total Salary</div>
-                <div class="stat-value">${stats.total_salary || 'N/A'}</div>
-            </div>`;
-            html += `<div class="stat-card">
-                <div class="stat-label">Projection</div>
-                <div class="stat-value">${stats.total_projection || 'N/A'} pts</div>
-            </div>`;
-            html += `<div class="stat-card">
-                <div class="stat-label">Salary Used</div>
-                <div class="stat-value">${stats.salary_used_pct || 'N/A'}</div>
-            </div>`;
-            html += '</div>';
-
-            if (lineup.length > 0) {
-                html += '<table class="lineup-table">';
-                html += '<thead><tr><th>Position</th><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value</th></tr></thead>';
-                html += '<tbody>';
-                
-                lineup.forEach(player => {
-                    const isLocked = player.is_locked || false;
-                    const rowClass = isLocked ? 'locked-row' : '';
-                    
-                    html += `<tr class="${rowClass}">`;
-                    html += `<td><strong>${player.slot}</strong></td>`;
-                    html += `<td>${player.name}${isLocked ? '<span class="locked-badge">LOCKED</span>' : ''}</td>`;
-                    html += `<td>${player.team || 'N/A'}</td>`;
-                    html += `<td>${player.salary}</td>`;
-                    html += `<td>${player.projection}</td>`;
-                    html += `<td>${player.value}</td>`;
-                    html += '</tr>';
-                });
-                
-                html += '</tbody></table>';
-            }
-
-            if (recommendations.length > 0) {
-                html += '<div class="recommendations">';
-                html += '<h4>📊 Analysis</h4>';
-                html += '<ul>';
-                recommendations.forEach(rec => {
-                    if (rec && rec.trim()) html += `<li>${rec}</li>`;
-                });
-                html += '</ul>';
-                html += '</div>';
-            }
-
-            showResult('success', html);
-            optimizeBtn.disabled = false;
-            optimizeBtn.textContent = '🚀 Optimize Lineup';
-        }
-
-        optimizeBtn.addEventListener('click', async () => {
-            if (!selectedFile) return;
-
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-                pollingInterval = null;
-            }
-            pollAttempts = 0;
-
-            optimizeBtn.disabled = true;
-            optimizeBtn.textContent = '⏳ Optimizing...';
-
-            try {
-                const csvText = await selectedFile.text();
-
-                // Get input values
-                const lockName = lockedPlayerName.value.trim();
-                const lockSalary = lockedPlayerSalary.value.trim();
-                const excludeRaw = excludedPlayersInput.value.trim();
-
-                // Parse excluded players (comma-separated)
-                let excludedPlayers = [];
-                if (excludeRaw) {
-                    excludedPlayers = excludeRaw
-                        .split(',')
-                        .map(s => s.trim())
-                        .filter(Boolean);
-                }
-
-                // Build payload
-                const payload = {
-                    csv: csvText,
-                    sport: 'nba'
-                };
-
-                // Add lock if provided
-                if (lockName) {
-                    payload.lock = lockName;
-                    
-                    // Also add metadata for backward compatibility
-                    payload.metadata = {
-                        locked_player: {
-                            last_name: lockName,
-                            max_salary: lockSalary ? parseInt(lockSalary) : null
-                        }
-                    };
-                }
-
-                // Add excludes if provided
-                if (excludedPlayers.length > 0) {
-                    payload.exclude = excludedPlayers;
-                    
-                    // Also add to metadata
-                    if (!payload.metadata) {
-                        payload.metadata = {};
-                    }
-                    payload.metadata.excluded_players = excludedPlayers;
-                }
-
-                console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
-
-                const response = await fetch('/api/optimize', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const data = await response.json();
-                console.log('📥 Response:', data);
-
-                if (response.ok && data.success) {
-                    const jobId = data.job_id;
-                    
-                    showResult('processing', `
-                        <h3>⏳ Optimization in Progress...</h3>
-                        <div class="spinner"></div>
-                        <p style="margin-top: 10px;">Processing your lineup through the agent pipeline...</p>
-                        <p style="font-size: 12px; color: #666; margin-top: 5px;">Job ID: <code>${jobId}</code></p>
-                        <p class="poll-status">Checking results...</p>
-                    `);
-
-                    pollingInterval = setInterval(() => pollForResults(jobId), 3000);
-                    setTimeout(() => pollForResults(jobId), 2000);
-
-                } else {
-                    showResult('error', `<h3>❌ Optimization Failed</h3><p>${data.error || 'Unknown error occurred'}</p>`);
-                    optimizeBtn.disabled = false;
-                    optimizeBtn.textContent = '🚀 Optimize Lineup';
-                }
-
-            } catch (error) {
-                console.error('❌ Error:', error);
-                showResult('error', `<h3>❌ Error</h3><p>${error.message}</p>`);
-                optimizeBtn.disabled = false;
-                optimizeBtn.textContent = '🚀 Optimize Lineup';
-            }
-        });
-
-        function showResult(type, html) {
-            result.className = `result ${type}`;
-            result.innerHTML = html;
-            result.style.display = 'block';
-        }
-    </script>
+setInterval(() => { if (current) renderGames(); }, 30000);
+loadParams(); loadSlates(); loadSlate();
+</script>
 </body>
 </html>
