@@ -21,10 +21,13 @@ URLS = [
 ]
 
 
-def probe(url, n=600):
+def probe(url, n=600, find=None):
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=15) as r:
             b = r.read()
+            if find:
+                i = b.find(find.encode())
+                b = b[max(0, i - 300):] if i >= 0 else b"(not found) " + b
             return {"status": r.status, "bytes": len(b), "type": r.headers.get("Content-Type"),
                     "head": b[:n].decode("utf-8", "replace")}
     except urllib.error.HTTPError as e:
@@ -52,5 +55,5 @@ class handler(BaseHTTPRequestHandler):
                                   key=lambda x: -x[3])[:2]}
             return send(self, 200, out)
         if q.get("url"):
-            return send(self, 200, probe(q["url"], int(q.get("n", 4000))))
+            return send(self, 200, probe(q["url"], int(q.get("n", 4000)), q.get("find")))
         send(self, 200, {u: probe(u) for u in URLS})
