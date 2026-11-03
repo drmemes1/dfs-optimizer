@@ -16,7 +16,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
-from . import db
+from . import db, prefs
 from .optimizer import SALARY_CAP, SLOTS, Settings, build_lineups, eligible_slots
 from .pool import eligible_pool, value_board
 from .signals import SIGNAL_COLUMNS, apply_signals, estimate_missing_ownership, is_out, is_questionable
@@ -262,8 +262,24 @@ def _summary(prep):
             "lineups": prep.get("lineups")}
 
 
+def _name_lists(conn, players, lock_names, exclude_names, remember):
+    """Typed lock/exclude names for this build, plus the standing lists saved earlier."""
+    if remember:
+        prefs.save(conn, lock_names, exclude_names)
+    standing = prefs.load(conn)
+    locks = prefs.split_names(lock_names) + [n for n in standing["lock"] if n not in prefs.split_names(lock_names)]
+    excl = prefs.split_names(exclude_names) + [n for n in standing["exclude"] if n not in prefs.split_names(exclude_names)]
+    out = prefs.resolve(players, locks, excl)
+    typed = {n.lower() for n in prefs.split_names(lock_names) + prefs.split_names(exclude_names)}
+    out["not_on_slate"] = [u["name"] for u in out["unmatched"] if u["name"].lower() not in typed and "why" not in u]
+    out["unmatched"] = [u for u in out["unmatched"] if u["name"] not in out["not_on_slate"]]
+    out["standing"] = standing
+    return out
+
+
 def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(),
-              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None, contest=None) -> dict:
+              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None, contest=None,
+              lock_names=None, exclude_names=None, remember=False) -> dict:
     overrides = clean_overrides(overrides)
     lineup_src = (fetch or lineup_sources.fetch_all)()
     with db.connect() as conn:
@@ -271,6 +287,8 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
         db.seed_params(conn)
         version, params = db.current_params(conn)
         prep = prepare(dk_text, rg_text, params, lineup_src)
+        names = _name_lists(conn, prep["players"], lock_names, exclude_names, remember)
+        locks, excludes = set(locks) | set(names["locks"]), set(excludes) | set(names["excludes"])
         lineups, costs, used = build_all(prep["players"], params, n_gpp, n_cash, overrides, locks, excludes)
         with conn.cursor() as cur:
             slate_id = save_slate(cur, prep["dk"])
@@ -281,10 +299,11 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
             run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, **_summary(prep),
-            "costs": costs}
+            "costs": costs, "names": names}
 
 
-def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(), contest=None) -> dict:
+def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(), contest=None,
+                lock_names=None, exclude_names=None, remember=False) -> dict:
     overrides = clean_overrides(overrides)
     with db.connect() as conn:
         db.migrate(conn)
@@ -293,10 +312,12 @@ def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes
             players, key_to_pid = pool_from_db(cur, slate_id)
             if not players:
                 raise UploadError("that slate has no player pool")
+            names = _name_lists(conn, players, lock_names, exclude_names, remember)
+            locks, excludes = set(locks) | set(names["locks"]), set(excludes) | set(names["excludes"])
             lineups, costs, used = build_all(players, params, n_gpp, n_cash, overrides, locks, excludes)
             run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
-    return {"slate_id": slate_id, "run_id": run_id, "params_version": version, "costs": costs,
+    return {"slate_id": slate_id, "run_id": run_id, "params_version": version, "costs": costs, "names": names,
             "counts": {m: len(v) for m, v in lineups.items()}}
 
 
