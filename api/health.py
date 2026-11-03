@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dfs import db  # noqa: E402
 
-TABLES = ["slates", "players", "pool", "actuals", "lineups", "params", "grades", "source_snapshots"]
+TABLES = ["schema_migrations", "slates", "players", "pool", "actuals", "lineups", "params", "grades", "source_snapshots"]
 
 
 class handler(BaseHTTPRequestHandler):
