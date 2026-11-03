@@ -24,8 +24,22 @@ jobs:
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ] || [ -z "$BYPASS" ]; then
             echo "::error::APP_URL, CRON_SECRET and VERCEL_BYPASS_SECRET repository secrets must all be set"; exit 1
           fi
-          code=$(curl -sS -o out.json -w '%{http_code}' --max-time 290 \
+          APP_URL="${APP_URL%/}"
+          code=$(curl -sS -o out.json -D headers.txt -w '%{http_code}' --max-time 290 \
             -H "Authorization: Bearer $CRON_SECRET" -H "x-vercel-protection-bypass: $BYPASS" \
             "$APP_URL/api/cron?job=snapshot")
           cat out.json; echo
-          if [ "$code" != "200" ]; then echo "::error::snapshot job returned HTTP $code"; exit 1; fi
+          case "$code" in
+            200) ;;
+            302|307|401|403)
+              loc=$(grep -i '^location:' headers.txt | tr -d '\r' || true)
+              if grep -qi 'sso-api\|vercel.com/login' headers.txt; then
+                echo "::error::Vercel's login wall rejected the request: VERCEL_BYPASS_SECRET does not match the project's Protection Bypass for Automation value ($loc)"
+              elif [ "$code" = "401" ]; then
+                echo "::error::The app rejected CRON_SECRET: the GitHub secret must equal the CRON_SECRET env var in Vercel"
+              else
+                echo "::error::snapshot job returned HTTP $code $loc"
+              fi
+              exit 1 ;;
+            *) echo "::error::snapshot job returned HTTP $code"; exit 1 ;;
+          esac
