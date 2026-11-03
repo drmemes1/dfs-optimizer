@@ -9,8 +9,9 @@
 - **Fetched automatically:** DK lobby (slate ID, lock time, game list), RotoGrinders + RotoWire lineups
   (starting fives, Vegas lines, injury news), StatMuse (box scores for grading).
 - **Not doing:** X/Twitter (API is paid; scraping breaks its terms), placing DK entries.
-- **Learning:** parameters move only from measured bias, ~1% per slate, and only if a replay over all
-  stored past slates does not get worse. Frozen keys (ownership knobs, max_from_team, pool rule) are
+- **Learning:** every graded night is kept forever and the learner uses **all** of them each morning
+  (recency-weighted, never discarded). Parameters move only from bias that holds across enough nights,
+  ~1% per slate, and only if a replay over all stored past slates does not get worse. Frozen keys (ownership knobs, max_from_team, pool rule) are
   never moved automatically.
 
 ## Roadmap
