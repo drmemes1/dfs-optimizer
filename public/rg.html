@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RotoGrinders Grabber</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e2dc; --accent:#2c5fd4; --accent-ink:#fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#151514; --panel:#1e1e1c; --ink:#ecebe6; --muted:#a3a29b; --line:#34332f; --accent:#7aa2ff; --accent-ink:#0f1a33; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  h1 { font-size: 20px; margin: 0 0 6px; } h2 { font-size: 15px; margin: 0 0 8px; }
+  .muted { color: var(--muted); }
+  a.bm { display:inline-block; background:var(--accent); color:var(--accent-ink); padding:8px 14px; border-radius:8px;
+         text-decoration:none; font-weight:600; cursor:grab; }
+  textarea { width:100%; height:110px; font:12px ui-monospace,monospace; color:var(--ink); background:var(--bg);
+             border:1px solid var(--line); border-radius:6px; padding:8px; }
+  button { font:inherit; padding:6px 12px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--ink); cursor:pointer; }
+  ol { padding-left: 20px; } li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/">← Back to the optimizer</a></p>
+  <h1>RotoGrinders projections</h1>
+  <p class="muted">RotoGrinders has no export. The optimizer can read the projections page itself using your login (automatic),
+    or you can grab the table from your browser with one click (backup).</p>
+
+  <section>
+    <h2>Automatic: connect your RotoGrinders login (computer, ~2 minutes, every week or two)</h2>
+    <ol>
+      <li>In Chrome, log in to rotogrinders.com and open <b>NBA → Projected Stats → DraftKings</b>.</li>
+      <li>Open developer tools (<b>F12</b>, or <b>Cmd+Option+I</b> on a Mac) → <b>Network</b> tab → reload the page.</li>
+      <li>Click the first request in the list (named like <code>nba?site=draftkings</code>) → <b>Headers</b> →
+        <b>Request Headers</b> → find <b>cookie</b> → right-click its value → <b>Copy value</b>.</li>
+      <li>Vercel → <b>dfs-optimizer</b> → Settings → Environment Variables → add <code>RG_COOKIE</code>, paste the value,
+        tick <b>Sensitive</b>, <b>Production</b> and <b>Preview</b> → Save → then redeploy production.</li>
+    </ol>
+    <p class="muted">Never paste the cookie into a chat or anywhere else. It is your logged-in session: anyone with it can use
+      your RotoGrinders account until it expires. When it expires, builds say so and you can use the button below for that day.
+      Automated reading of your own account may go against RotoGrinders' terms of service; that choice is yours.</p>
+  </section>
+
+  <section>
+    <h2>Backup: the grabber button — one-time setup (computer)</h2>
+    <p>Drag this button onto your bookmarks bar:</p>
+    <p><a class="bm" id="bm" href="#">Grab RG projections</a></p>
+    <p class="muted">Bookmarks bar hidden? Chrome/Edge: Ctrl/Cmd+Shift+B. Safari: View → Show Favorites Bar.</p>
+  </section>
+
+  <section>
+    <h2>Each slate</h2>
+    <ol>
+      <li>Open RotoGrinders → NBA → Projected Stats, <b>DraftKings</b>, logged in. Let the table load fully.</li>
+      <li>Click <b>Grab RG projections</b> in your bookmarks bar. It downloads <code>rg-projections-DATE.tsv</code>,
+        copies the same text to your clipboard, and tells you how many players it captured.</li>
+      <li>Back in the optimizer, choose that file in the RotoGrinders box, or paste into the paste box, and Build.</li>
+    </ol>
+    <p class="muted">The optimizer checks the columns against the page's headers (FPTS must be column 28, not the PrizePicks column
+      next to it) and refuses the file if anything doesn't line up, so a layout change can never silently feed it wrong numbers.</p>
+  </section>
+
+  <section>
+    <h2>On a phone, or if dragging doesn't work</h2>
+    <ol>
+      <li>Bookmark any page, then edit that bookmark.</li>
+      <li>Replace its address with the text below (Copy button) and name it <i>Grab RG projections</i>.</li>
+      <li>On the RotoGrinders page, open your bookmarks and tap it.</li>
+    </ol>
+    <textarea id="code" readonly></textarea>
+    <p><button id="copy">Copy</button> <span id="copied" class="muted"></span></p>
+  </section>
+</main>
+<script>
+// The bookmarklet. Kept readable here; it is URL-encoded into the link below.
+function grab() {
+  try {
+    const clean = (s) => s.replace(/[\r\n]+/g, " ").replace(/ /g, " ").trim();
+    const tables = [...document.querySelectorAll("table")].filter((t) => t.rows.length > 20)
+      .sort((a, b) => b.rows.length - a.rows.length);
+    if (!tables.length) { alert("No projections table found. Open RotoGrinders NBA Projected Stats (DraftKings) and wait for it to load."); return; }
+    const t = tables[0];
+    const isHeader = (r) => r.parentElement.tagName === "THEAD" || [...r.cells].every((c) => c.tagName === "TH");
+    const rows = [...t.rows];
+    const lines = [];
+    let n = 0;
+    for (const r of rows) {
+      const cells = r.innerText.split("\t").map(clean);   // tab split of each row's innerText, never querySelectorAll('td')
+      if (!cells.join("").length) continue;
+      if (isHeader(r)) lines.push("#H\t" + cells.join("\t"));
+      else { lines.push(cells.join("\t")); n++; }
+    }
+    const text = ["#RG-TABLE\t" + location.href + "\t" + new Date().toISOString() + "\t" + n, ...lines].join("\n");
+    const name = "rg-projections-" + new Date().toISOString().slice(0, 10) + ".tsv";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/tab-separated-values" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    const done = (how) => alert("Captured " + n + " players. Saved " + name + how + ".");
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => done(" and copied it to the clipboard"), () => done(""));
+    else done("");
+  } catch (e) { alert("Grab failed: " + e.message); }
+}
+const code = "javascript:(" + grab.toString() + ")();";
+document.getElementById("bm").href = "javascript:" + encodeURIComponent("(" + grab.toString() + ")();");
+document.getElementById("bm").addEventListener("click", (e) => { e.preventDefault(); alert("Drag this button to your bookmarks bar, then click it on the RotoGrinders projections page."); });
+document.getElementById("code").value = code;
+document.getElementById("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(code); document.getElementById("copied").textContent = "Copied."; }
+  catch (e) { document.getElementById("code").select(); document.getElementById("copied").textContent = "Select-all and copy manually."; }
+};
+</script>
+</body>
+</html>

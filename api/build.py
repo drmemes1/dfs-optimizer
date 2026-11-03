@@ -35,8 +35,9 @@ def _post(h):
     if action == "build":
         dk, dk_raw = pipeline.decode_upload(b.get("dk_b64"), b.get("dk_csv"))
         rg, rg_raw = pipeline.decode_upload(b.get("rg_b64"), b.get("rg_csv"))
-        if not dk or not rg:
-            raise UploadError("Upload both DKSalaries.csv and the RotoGrinders export")
+        if not dk:
+            raise UploadError("Upload DKSalaries.csv")
+        # rg may be empty: run_build then reads RotoGrinders with the stored login (or explains why it can't)
         out = pipeline.run_build(dk, rg, n_gpp, n_cash, dk_raw=dk_raw, rg_raw=rg_raw,
                                  dk_name=b.get("dk_name"), rg_name=b.get("rg_name"), **common, **names)
     elif action == "rebuild":

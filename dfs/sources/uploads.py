@@ -116,6 +116,9 @@ def map_rg_headers(headers: list[str]) -> dict:
 
 
 def parse_rg_projections(text: str) -> list[dict]:
+    from . import rg_table
+    if rg_table.is_rg_table(text):          # captured by the bookmarklet from the projections page
+        return rg_table.parse(text)["rows"]
     rows = _rows(text)
     if not rows:
         raise UploadError("RotoGrinders file has no rows")

@@ -86,15 +86,19 @@
 <main>
   <section>
     <h2>Build lineups</h2>
-    <p class="muted" style="margin:0 0 10px">Upload DraftKings' <b>DKSalaries.csv</b> (contest page → Export to CSV) and your
-      <b>RotoGrinders</b> projections export. Re-uploading later in the day updates the same slate.</p>
+    <p class="muted" style="margin:0 0 10px">Upload DraftKings' <b>DKSalaries.csv</b> (contest page → Export to CSV). RotoGrinders
+      projections are read automatically when your RotoGrinders login is connected; otherwise add them with the
+      <a href="/rg.html">grabber button</a>. Re-uploading later in the day updates the same slate.</p>
     <form id="buildForm" class="row">
       <label>DKSalaries.csv <input type="file" id="dkFile" accept=".csv,text/csv" required></label>
-      <label>RotoGrinders export <input type="file" id="rgFile" accept=".csv,text/csv" required></label>
+      <label>RotoGrinders projections <input type="file" id="rgFile" accept=".tsv,.csv,.txt,text/csv,text/tab-separated-values"></label>
       <label>GPP lineups <input type="number" id="nGpp" value="10" min="1" max="40"></label>
       <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
       <button class="primary" id="buildBtn" type="submit">Build</button>
     </form>
+    <details id="rgPasteBox"><summary>RotoGrinders: paste instead of a file · <a href="/rg.html">get the grabber button</a></summary>
+      <textarea id="rgPaste" rows="3" style="width:100%;font:12px ui-monospace,monospace" placeholder="Paste what the Grab RG projections button copied"></textarea>
+    </details>
     <div class="row" style="margin-top:10px">
       <label style="flex:1;min-width:220px">Lock (always use) — names, comma-separated
         <input id="lockNames" placeholder="Jalen Brunson, Lu Dort"></label>
@@ -493,9 +497,12 @@ $("rebuildBtn").onclick = async () => {
 $("buildForm").onsubmit = async (e) => {
   e.preventDefault();
   const btn = $("buildBtn"), msg = $("buildMsg"), dk = $("dkFile").files[0], rg = $("rgFile").files[0];
+  const rgPaste = $("rgPaste").value.trim();
+  if (!dk) { msg.innerHTML = '<div class="msg bad">Choose DKSalaries.csv.</div>'; return; }
   btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
   try {
-    const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, rg_b64: await fileB64(rg), rg_name: rg.name,
+    const rgPart = rg ? { rg_b64: await fileB64(rg), rg_name: rg.name } : rgPaste ? { rg_csv: rgPaste, rg_name: "pasted" } : {};
+    const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, ...rgPart,
       n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx(), ...nameFields() });
     const w = j.warnings, notes = nameNotes(j.names);
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);

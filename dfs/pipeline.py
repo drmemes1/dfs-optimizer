@@ -286,6 +286,11 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
               dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None, contest=None,
               lock_names=None, exclude_names=None, remember=False) -> dict:
     overrides = clean_overrides(overrides)
+    rg_page_gz = None
+    if not rg_text:   # no file/paste given: read RotoGrinders directly with the user's stored login
+        from .sources import rg_fetch
+        rg_text, rg_page_gz = rg_fetch.fetch_table_text()
+        rg_raw, rg_name = rg_text.encode("utf-8"), "fetched-from-rotogrinders"
     lineup_src = (fetch or lineup_sources.fetch_all)()
     with db.connect() as conn:
         db.migrate(conn)
@@ -301,6 +306,8 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
             save_uploads(cur, slate_id, {"dk_salaries_csv": (dk_name, dk_raw or dk_text.encode()),
                                          "rg_projections_csv": (rg_name, rg_raw or rg_text.encode())})
             save_pages(cur, slate_id, lineup_src)
+            if rg_page_gz:
+                save_uploads(cur, slate_id, {"rg_projections_page_html_gz": ("rotogrinders.html.gz", rg_page_gz)})
             run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, **_summary(prep),
