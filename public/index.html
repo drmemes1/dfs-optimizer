@@ -170,6 +170,11 @@
     <div id="stMsg" style="margin-top:8px"></div>
   </section>
 
+  <section id="resultsSec" hidden>
+    <h2>Results <span class="muted" id="resultsWhen" style="font-weight:400"></span></h2>
+    <div id="results"></div>
+  </section>
+
   <section id="poolSec" hidden>
     <div class="row" style="justify-content:space-between;align-items:center">
       <h2 style="margin:0">Player pool · lock / exclude</h2>
@@ -380,7 +385,38 @@ function render() {
           const keep = checkResult; await loadSlate(s.id); checkResult = keep && (await api(`/api/slate?id=${s.id}&check=1`)); render(); }
     catch (e) { alert(e.message); b.disabled = false; }
   });
-  renderPool(); renderLower();
+  renderPool(); renderLower(); renderResults();
+}
+
+function renderResults() {
+  const g = current.grade?.payload;
+  $("resultsSec").hidden = !g;
+  if (!g) return;
+  $("resultsWhen").textContent = "· graded " + new Date(current.grade.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const h = g.hindsight_optimal, ent = g.lineups?.entered || [], best = g.lineups?.best_generated;
+  const row = (k, v) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`;
+  const bias = Object.entries(g.bias_by_bucket || {}).filter(([, b]) => b).map(([k, b]) =>
+    `<tr><td>${esc(k.replaceAll("_", " "))}</td><td class="n">${b.n}</td><td class="n ${b.mean_error >= 0 ? "good" : "bad"}">${b.mean_error >= 0 ? "+" : ""}${fmt(b.mean_error)}</td></tr>`).join("");
+  const games = Object.entries(g.bias_by_game || {}).map(([k, b]) =>
+    `<tr><td>${esc(k)}</td><td class="n">${fmt(b.projected_total_dk, 0)}</td><td class="n">${fmt(b.actual_total_dk, 0)}</td><td class="n ${b.mean_error >= 0 ? "good" : "bad"}">${b.mean_error >= 0 ? "+" : ""}${fmt(b.mean_error)}</td></tr>`).join("");
+  const vb = Object.entries(g.value_board_hits || {}).map(([k, v]) => `${k}: ${v.hit_25}/${v.n}`).join(" · ");
+  $("results").innerHTML = `<div class="two">
+    <div><table>
+      ${row("Your entered lineups", ent.length ? ent.map(e => `${e.mode} #${e.rank}: <b>${fmt(e.actual)}</b> (proj ${fmt(e.proj)})`).join("<br>") : '<span class="muted">none marked entered</span>')}
+      ${row("Best generated lineup", best ? `${best.mode} #${best.rank}: <b>${fmt(best.actual)}</b>` : "–")}
+      ${row("Hindsight-perfect lineup", h ? `<b>${fmt(h.score)}</b> using ${money(h.salary)} · shape: ${h.salary_shape.under_4500} under $4.5K, ${h.salary_shape["4500_6500"]} $4.5–6.5K, ${h.salary_shape["6500_8000"]} $6.5–8K, ${h.salary_shape["8000_plus"]} $8K+` : "–")}
+      ${row("Projection error (avg)", `ours <b>${fmt(g.mae_ours, 2)}</b> vs RotoGrinders ${fmt(g.mae_rotogrinders, 2)} over ${g.n_players} players`)}
+      ${row("Value board 25+ hits", esc(vb) || "–")}
+    </table>
+    <p class="muted small">One slate is one draw: these numbers become meaningful across many graded slates, which is when the learner uses them.</p></div>
+    <div><b class="small">Best plays we missed</b><table>${(g.missed_plays || []).map(m =>
+      `<tr><td>${esc(m.name)}</td><td class="n">${money(m.salary)}</td><td class="n">${fmt(m.actual)} <span class="muted">(proj ${fmt(m.proj)})</span></td><td class="n muted">${fmt(m.own)}%</td></tr>`).join("")}</table>
+    ${h ? `<b class="small">Hindsight-perfect lineup</b><table>${h.players.map(p => `<tr><td class="muted">${p.slot}</td><td>${esc(p.name)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.actual)} <span class="muted">(proj ${fmt(p.proj)})</span></td></tr>`).join("")}</table>` : ""}</div>
+  </div>
+  <details><summary>Projection bias by signal and by game</summary><div class="two">
+    <table><tr><th>Bucket</th><th class="n">n</th><th class="n">actual − proj</th></tr>${bias}</table>
+    <table><tr><th>Game</th><th class="n">Proj DK</th><th class="n">Actual DK</th><th class="n">avg miss</th></tr>${games}</table>
+  </div></details>`;
 }
 
 function renderPool() {

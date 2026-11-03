@@ -50,11 +50,14 @@ def slate_detail(conn, slate_id=None):
                        FROM pool pl JOIN players p ON p.id = pl.player_id
                        WHERE pl.slate_id=%s ORDER BY pl.proj_adj DESC NULLS LAST""", (slate_id,))
         pool = cur.fetchall()
+    with conn.cursor() as cur:
+        cur.execute("SELECT created_at, payload FROM grades WHERE slate_id=%s ORDER BY created_at DESC LIMIT 1", (slate_id,))
+        grade = cur.fetchone()
     board = sorted([p for p in pool if p["value_grade"]],
                    key=lambda p: ("ABCD".index(p["value_grade"]), -(p["value"] or 0)))
     watch = [p for p in pool if (p["inj_status"] or "") in ("Q", "GTD", "D", "O", "OUT", "NOPROJ") or p["contingent"]]
     return {"slate": slate, "run": run, "lineups": lineups, "entered_other_runs": entered_elsewhere,
-            "value_board": board, "watch": watch, "pool": pool}
+            "value_board": board, "watch": watch, "pool": pool, "grade": grade}
 
 
 def dk_upload_csv(conn, slate_id, mode="GPP", entered_only=False) -> str:
