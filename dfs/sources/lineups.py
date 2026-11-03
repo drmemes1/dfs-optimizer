@@ -10,7 +10,7 @@ import re
 from bs4 import BeautifulSoup
 
 from ..http import get
-from ..names import name_norm
+from ..names import NameIndex, name_norm
 
 ROTOWIRE_URL = "https://www.rotowire.com/basketball/nba-lineups.php"
 RG_LINEUPS_URL = "https://rotogrinders.com/lineups/nba?site=draftkings"
@@ -181,30 +181,55 @@ def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> d
         vegas[k] = {"total": g["total"] or cur.get("total"), "fav_ml": g["fav_ml"] or cur.get("fav_ml")}
 
     have_rw, have_rg = bool(rw_games), bool(rg_games)
-    report = {"sources": {"rotowire": have_rw, "rotogrinders": have_rg}, "disagreements": [], "unmatched_teams": []}
+    report = {"sources": {"rotowire": have_rw, "rotogrinders": have_rg}, "disagreements": [],
+              "unmatched_teams": [], "unmatched_names": [], "fuzzy_matches": []}
     for p in players:
-        team, opp = team_code(p.get("team")), team_code(p.get("opp"))
-        rw, rg = rw_team.get(team), rg_team.get(team)
-        if (have_rw and rw is None) or (have_rg and rg is None):
+        p["team_code"] = team_code(p.get("team"))
+    index = NameIndex(players)
+    slate_teams = {p["team_code"] for p in players}
+
+    def resolve(source, team, entries):
+        """Map a source's player list for one team onto pool keys; report every miss loudly."""
+        keys, tags = set(), {}
+        for e in entries:
+            hit, how = index.find(e["name"], team)
+            if hit is None:
+                report["unmatched_names"].append({"source": source, "team": team, "name": e["name"]})
+                continue
+            if how != "exact":
+                report["fuzzy_matches"].append({"source": source, "team": team, "name": e["name"],
+                                                "matched": hit["name"]})
+            keys.add(id(hit))
+            if e.get("inj"):
+                tags[id(hit)] = e["inj"]
+        return keys, tags
+
+    rw_start, rw_tags, rg_start = {}, {}, {}
+    for team in slate_teams:
+        if team in rw_team:
+            k, t = resolve("rotowire", team, rw_team[team]["starters"])
+            _, t2 = resolve("rotowire", team, rw_team[team]["may_not_play"])
+            rw_start[team], rw_tags[team] = k, {**t2, **t}
+        elif have_rw:
             report["unmatched_teams"].append(team)
-        nn = p["name_norm"]
-        p["starter_rw"] = (nn in {s["name_norm"] for s in rw["starters"]}) if rw else None
-        p["starter_rg"] = (nn in {s["name_norm"] for s in rg["starters"]}) if rg else None
+        if team in rg_team:
+            rg_start[team], _ = resolve("rotogrinders", team, rg_team[team]["starters"])
+        elif have_rg:
+            report["unmatched_teams"].append(team)
+
+    for p in players:
+        team, opp = p["team_code"], team_code(p.get("opp"))
+        rw = rw_team.get(team)
+        p["starter_rw"] = (id(p) in rw_start[team]) if team in rw_start else None
+        p["starter_rg"] = (id(p) in rg_start[team]) if team in rg_start else None
         known = [x for x in (p["starter_rw"], p["starter_rg"]) if x is not None]
         p["starter_consensus"] = bool(known) and all(known)
-        # injury tag from RotoWire (starters can carry one too), merged with the upload's tag
-        rw_tag = ""
-        if rw:
-            for s in rw["starters"] + rw["may_not_play"]:
-                if s["name_norm"] == nn:
-                    rw_tag = s["inj"]
+        rw_tag = rw_tags.get(team, {}).get(id(p), "")
         p["inj_status"] = _worse((p.get("inj_status") or "").upper(), rw_tag)
-        # contingent: a cheap player whose starting role is disputed, or depends on an unresolved tag
         disputed = len(known) == 2 and known[0] != known[1]
         unresolved = False
         if p["starter_consensus"] and rw and rw["status"] != "confirmed":
-            unresolved = any(s["inj"] in ("Q", "GTD", "D") for s in rw["starters"] + rw["may_not_play"]
-                             if s["name_norm"] != nn)
+            unresolved = any(tag in ("Q", "GTD", "D") for pid, tag in rw_tags.get(team, {}).items() if pid != id(p))
         p["contingent"] = p["salary"] < cheap_cutoff and (disputed or unresolved)
         if disputed and p["salary"] < cheap_cutoff:
             report["disagreements"].append({"name": p["name"], "team": team, "rotowire_starter": p["starter_rw"],

@@ -380,6 +380,9 @@ $("buildForm").onsubmit = async (e) => {
     const w = j.warnings, notes = [];
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
+    if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name + initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);
+    if (w.unmatched_lineup_names?.length) notes.push(`<span class="bad">${w.unmatched_lineup_names.length} names on the lineup pages didn't match anyone in the DK pool:</span> ${esc(w.unmatched_lineup_names.slice(0, 12).map(u => u.name + " (" + u.team + ", " + u.source + ")").join(", "))}`);
+    for (const [src, err] of Object.entries(w.lineup_source_errors || {})) notes.push(`<span class="bad">${esc(src)} lineups failed:</span> ${esc(err)}`);
     if (w.own_estimated) notes.push(`<span class="warn">${w.own_estimated} ownership values estimated</span> (not yet published).`);
     notes.push(`<span class="warn">${esc(w.starters_source)}.</span>`);
     msg.innerHTML = `<div class="msg">Built ${j.players} players across ${j.games.length} games · params v${j.params_version}.<br>${notes.join("<br>")}</div>`;

@@ -69,3 +69,13 @@ def test_one_source_down_still_works():
 def test_team_aliases():
     assert team_code("GS") == team_code("GSW") == "GSW"
     assert team_code("pho") == "PHX" and team_code("NO") == "NOP"
+
+
+def test_unmatched_and_fuzzy_names_are_loud():
+    src = {"rotowire": parse_rotowire((FX / "rotowire_sample.html").read_text()),
+           "rg": parse_rg_lineups((FX / "rg_lineups_sample.html").read_text())}
+    ps = [_p("Kenrich Williams", "OKC", "CLE", 4300), _p("Shai Gilgeous-Alexander", "OKC", "CLE", 10100)]
+    rep = apply_lineups(ps, src)
+    names = {u["name"] for u in rep["unmatched_names"]}
+    assert "Ajay Mitchell" in names and "Isaiah Hartenstein" in names   # starters not in this pool -> reported
+    assert ps[1]["starter_consensus"]

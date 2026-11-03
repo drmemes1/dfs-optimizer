@@ -82,3 +82,19 @@ def test_ownership_estimate_only_for_unpublished_games(  ):
     est = [p for p in ps if p.get("own_estimated")]
     assert est and all(p["game"].endswith("H2") and p["own_pct"] > 0 for p in est)
     assert not any(p.get("own_estimated") for p in ps if not p["game"].endswith("H2"))
+
+
+def test_aliases_and_initial_fallback_are_reported():
+    from dfs.names import NameIndex, match_key
+    assert match_key("Lu Dort") == match_key("Luguentz Dort")
+    assert match_key("Nic Claxton") == match_key("Nicolas Claxton")
+    pool = [{"name": "Luguentz Dort", "team": "ATL"}, {"name": "Jalen Williams", "team": "OKC"},
+            {"name": "Jaylin Williams", "team": "OKC"}, {"name": "Kenyon Martin Jr.", "team": "UTA"}]
+    idx = NameIndex(pool)
+    assert idx.find("Lu Dort", "ATL") == (pool[0], "exact")
+    assert idx.find("K.J. Martin", "UTA")[0] is pool[3]
+    # same last name on one team: initial fallback must not guess between Jalen and Jaylin
+    assert idx.find("J. Williams", "OKC") == (None, "none")
+    p, how = idx.find("Luke Dort", "ATL")
+    assert p is pool[0] and how == "initial"          # fallback match, flagged as such
+    assert idx.find("Nobody Here", "ATL") == (None, "none")

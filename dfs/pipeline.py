@@ -252,6 +252,9 @@ def _summary(prep):
             "warnings": {"unmatched_dk": m["unmatched_dk"], "unmatched_rg": m["unmatched_rg"][:40],
                          "salary_mismatch": m["salary_mismatch"],
                          "own_estimated": sum(1 for p in prep["players"] if p.get("own_estimated")),
+                         "fuzzy_matches": m.get("fuzzy_matches", []) + ((prep.get("lineups") or {}).get("fuzzy_matches") or []),
+                         "unmatched_lineup_names": (prep.get("lineups") or {}).get("unmatched_names") or [],
+                         "lineup_source_errors": (prep.get("lineups") or {}).get("errors") or {},
                          "starters_source": _lineup_warning(prep.get("lineups"))},
             "lineups": prep.get("lineups")}
 

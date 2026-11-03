@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ..names import name_norm
+from ..names import NameIndex, name_norm
 
 ET = ZoneInfo("America/New_York")
 
@@ -142,22 +142,26 @@ def parse_rg_projections(text: str) -> list[dict]:
 
 
 def merge(dk: dict, rg: list[dict]) -> dict:
-    """Attach RG projections to DK players by normalized name (team as tiebreak).
-    DK salary/position are authoritative; RG salary mismatches are reported, not used."""
-    by_name: dict[str, list[dict]] = {}
+    """Attach RG projections to DK players (DK is the pool; never the reverse). Exact normalized/alias
+    name first, then a reported same-team last-name + initial fallback. DK salary/position win;
+    RG salary mismatches are reported, not used."""
+    index = NameIndex(dk["players"])
+    by_player, unmatched_rg, fuzzy = {}, [], []
     for r in rg:
-        by_name.setdefault(r["name_norm"], []).append(r)
+        hit, how = index.find(r["name"], r.get("team"))
+        if hit is None:
+            if r["proj_rg"]:
+                unmatched_rg.append(r["name"])
+            continue
+        if how != "exact":
+            fuzzy.append({"name": r["name"], "matched": hit["name"]})
+        by_player.setdefault(id(hit), r)
     merged, unmatched_dk, salary_mismatch = [], [], []
-    used = set()
     for p in dk["players"]:
-        cands = by_name.get(p["name_norm"], [])
-        if len(cands) > 1:
-            cands = [c for c in cands if c["team"] == p["team"]] or cands
-        if not cands:
+        r = by_player.get(id(p))
+        if r is None:
             unmatched_dk.append(p["name"])
             continue
-        r = cands[0]
-        used.add(id(r))
         if r["salary_rg"] and int(r["salary_rg"]) != p["salary"]:
             salary_mismatch.append({"name": p["name"], "dk": p["salary"], "rg": int(r["salary_rg"])})
         floor = r["floor_rg"] if r["floor_rg"] is not None else r["proj_rg"]
@@ -165,6 +169,5 @@ def merge(dk: dict, rg: list[dict]) -> dict:
         merged.append({**p, "proj_rg": r["proj_rg"], "floor_rg": floor, "ceil_rg": ceil,
                        "sim85": r["sim85"], "minutes": r["minutes"], "own_pct": r["own_pct"],
                        "inj_status": r["rg_inj"]})
-    unmatched_rg = [r["name"] for r in rg if id(r) not in used and r["proj_rg"]]
     return {"players": merged, "unmatched_dk": unmatched_dk, "unmatched_rg": unmatched_rg,
-            "salary_mismatch": salary_mismatch}
+            "salary_mismatch": salary_mismatch, "fuzzy_matches": fuzzy}
