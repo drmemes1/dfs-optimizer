@@ -26,3 +26,31 @@ def make_slate(n_games=4, per_team=9, seed=0):
                     "value": round(proj / (sal / 1000), 2),
                 })
     return players
+
+
+import os
+import uuid
+
+import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fresh_test_database():
+    """When TEST_DATABASE_URL is set, run the session against a brand-new database created next to it
+    and dropped afterwards, so results never depend on rows left by an earlier run."""
+    base = os.environ.get("TEST_DATABASE_URL")
+    if not base:
+        yield
+        return
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+    name = f"dfstest_{uuid.uuid4().hex[:10]}"
+    with psycopg.connect(base, autocommit=True) as c:
+        c.execute(f'CREATE DATABASE "{name}"')
+    os.environ["TEST_DATABASE_URL"] = make_conninfo(**{**conninfo_to_dict(base), "dbname": name})
+    try:
+        yield
+    finally:
+        os.environ["TEST_DATABASE_URL"] = base
+        with psycopg.connect(base, autocommit=True) as c:
+            c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
