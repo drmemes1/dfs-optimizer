@@ -31,15 +31,16 @@ def _post(h):
     n_cash = max(1, min(int(b.get("n_cash") or 3), 10))
     common = dict(overrides=b.get("overrides"), locks=_ints(b.get("locks")), excludes=_ints(b.get("excludes")),
                   contest=contests.clean_context(b.get("contest")))
+    names = dict(lock_names=b.get("lock_names"), exclude_names=b.get("exclude_names"), remember=bool(b.get("remember")))
     if action == "build":
         dk, dk_raw = pipeline.decode_upload(b.get("dk_b64"), b.get("dk_csv"))
         rg, rg_raw = pipeline.decode_upload(b.get("rg_b64"), b.get("rg_csv"))
         if not dk or not rg:
             raise UploadError("Upload both DKSalaries.csv and the RotoGrinders export")
         out = pipeline.run_build(dk, rg, n_gpp, n_cash, dk_raw=dk_raw, rg_raw=rg_raw,
-                                 dk_name=b.get("dk_name"), rg_name=b.get("rg_name"), **common)
+                                 dk_name=b.get("dk_name"), rg_name=b.get("rg_name"), **common, **names)
     elif action == "rebuild":
-        out = pipeline.run_rebuild(int(b["slate_id"]), n_gpp, n_cash, **common)
+        out = pipeline.run_rebuild(int(b["slate_id"]), n_gpp, n_cash, **common, **names)
     elif action == "refresh":
         rg, rg_raw = pipeline.decode_upload(b.get("rg_b64"), b.get("rg_csv"))
         dk, dk_raw = pipeline.decode_upload(b.get("dk_b64"), b.get("dk_csv"))

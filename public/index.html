@@ -95,6 +95,17 @@
       <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
       <button class="primary" id="buildBtn" type="submit">Build</button>
     </form>
+    <div class="row" style="margin-top:10px">
+      <label style="flex:1;min-width:220px">Lock (always use) — names, comma-separated
+        <input id="lockNames" placeholder="Jalen Brunson, Lu Dort"></label>
+      <label style="flex:1;min-width:220px">Exclude (never use)
+        <input id="exclNames" placeholder="Player I don't like, Another Guy"></label>
+      <label style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="rememberNames">
+        Save as my standing lists</label>
+    </div>
+    <p class="muted small" style="margin:4px 0 0">First and last name is enough (accents, Jr. and nicknames are handled). Add a team if two
+      players share a name: <i>Jalen Williams (OKC)</i>. Saved lists apply to every slate until you change them; clear a box and
+      tick "save" to empty it. Used by Build and Rebuild.</p>
     <details id="contestDetails">
       <summary>Contest these lineups are for</summary>
       <div class="row">
@@ -142,10 +153,11 @@
   </section>
 
   <section>
-    <h2>Contest results</h2>
-    <p class="muted small" style="margin:0 0 8px">After the slate, open the contest on DraftKings and download the standings CSV
-      (contest-standings-<i>id</i>.csv). It records actual ownership, the full field's scores, and your finishes. Your entries
-      are matched to the lineups saved here and graded.</p>
+    <h2>Contest results <span class="muted" style="font-weight:400">· optional</span></h2>
+    <p class="muted small" style="margin:0 0 8px">You don't need this for grading: every saved lineup is graded automatically the next
+      morning from verified box scores. Uploading a contest's standings CSV (DraftKings contest page → download standings) adds what
+      box scores can't: actual ownership, the whole field's scores, and your exact finishes. That data trains the ownership and
+      field models later, so it's worth doing for your main contests when convenient.</p>
     <div class="row">
       <label>Standings CSV <input type="file" id="stFile" accept=".csv,text/csv"></label>
       <label>Your DK username <input id="stUser" placeholder="drmemes1"></label>
@@ -216,6 +228,11 @@ async function fileB64(file) {
 async function loadParams() {
   try {
     const j = await api("/api/slate?params=1"); params = j.params; $("pv").textContent = j.version;
+    if (j.name_lists) {
+      $("lockNames").value = (j.name_lists.lock || []).join(", ");
+      $("exclNames").value = (j.name_lists.exclude || []).join(", ");
+      $("rememberNames").checked = !!((j.name_lists.lock || []).length || (j.name_lists.exclude || []).length);
+    }
     const cell = (m, k) => {
       const v = params[m]?.[k];
       return `<input type="number" step="any" data-m="${m}" data-k="${k}" value="${v ?? ""}" placeholder="${v ?? "–"}">`;
@@ -224,6 +241,22 @@ async function loadParams() {
     $("consGrid").innerHTML = '<span></span><b>GPP</b><b>Cash</b>' + CONS.map(([k, label]) =>
       `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="muted">n/a</span>' : cell("CASH", k)}`).join("");
   } catch (e) { /* db not ready */ }
+}
+
+function nameFields() {
+  return { lock_names: $("lockNames").value, exclude_names: $("exclNames").value, remember: $("rememberNames").checked };
+}
+
+function nameNotes(n) {
+  if (!n) return [];
+  const notes = [];
+  if (n.unmatched?.length) notes.push(`<span class="bad">Names not found:</span> ${esc(n.unmatched.map(u => u.name + (u.why ? " (" + u.why + ")" : "")).join("; "))}`);
+  if (n.cant_lock?.length) notes.push(`<span class="bad">Can't lock (ruled out):</span> ${esc(n.cant_lock.map(c => c.name + " " + c.status).join(", "))}`);
+  if (n.conflicts?.length) notes.push(`<span class="warn">On both lists, excluded:</span> ${esc(n.conflicts.join(", "))}`);
+  if (n.fuzzy?.length) notes.push(`<span class="warn">Matched by last name (check):</span> ${esc(n.fuzzy.map(f => f.name + " → " + f.matched).join(", "))}`);
+  if (n.not_on_slate?.length) notes.push(`<span class="muted">Saved-list players not on this slate: ${esc(n.not_on_slate.join(", "))}</span>`);
+  if (n.locks?.length || n.excludes?.length) notes.push(`<span class="muted">Applied ${n.locks.length} lock(s) and ${n.excludes.length} exclude(s) by name.</span>`);
+  return notes;
 }
 
 function contestCtx() {
@@ -413,9 +446,11 @@ $("refreshBtn").onclick = async () => {
 $("rebuildBtn").onclick = async () => {
   const b = $("rebuildBtn"); b.disabled = true; b.textContent = "Rebuilding…";
   try {
-    await post("/api/build", { action: "rebuild", slate_id: current.slate.id, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value,
-      overrides: overrides(), locks: [...locks], excludes: [...excludes], contest: contestCtx() });
+    const j = await post("/api/build", { action: "rebuild", slate_id: current.slate.id, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value,
+      overrides: overrides(), locks: [...locks], excludes: [...excludes], contest: contestCtx(), ...nameFields() });
+    const nn = nameNotes(j.names);
     await loadSlate(current.slate.id); $("slateSec").scrollIntoView({ behavior: "smooth" });
+    if (nn.length) $("costMsg").insertAdjacentHTML("afterbegin", `<div class="msg" style="margin-bottom:10px">${nn.join("<br>")}</div>`);
   } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = "Rebuild"; }
 };
 
@@ -425,8 +460,8 @@ $("buildForm").onsubmit = async (e) => {
   btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
   try {
     const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, rg_b64: await fileB64(rg), rg_name: rg.name,
-      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx() });
-    const w = j.warnings, notes = [];
+      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx(), ...nameFields() });
+    const w = j.warnings, notes = nameNotes(j.names);
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
     if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name + initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);

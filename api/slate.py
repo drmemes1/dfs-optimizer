@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dfs import db, jobs, pipeline, queries  # noqa: E402
+from dfs import db, jobs, pipeline, prefs, queries  # noqa: E402
 from dfs.web import guarded, query, send  # noqa: E402
 
 
@@ -21,7 +21,7 @@ def _get(h):
         db.seed_params(conn)
         if q.get("params"):
             version, params = db.current_params(conn)
-            return send(h, 200, {"ok": True, "version": version, "params": params})
+            return send(h, 200, {"ok": True, "version": version, "params": params, "name_lists": prefs.load(conn)})
         if q.get("list"):
             return send(h, 200, {"ok": True, "slates": queries.list_slates(conn)})
         sid = int(q["id"]) if q.get("id") else None
