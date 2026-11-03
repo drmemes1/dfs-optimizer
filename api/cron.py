@@ -1,4 +1,4 @@
-"""GET /api/cron?job=snapshot   — scheduled work. Requires `Authorization: Bearer $CRON_SECRET`.
+"""GET /api/cron?job=snapshot|grade   — scheduled work. Requires `Authorization: Bearer $CRON_SECRET`.
 Called by the GitHub Actions schedule (.github/workflows/snapshots.yml) or Vercel Cron."""
 import hmac
 import os
@@ -24,6 +24,11 @@ def _get(h):
     if job == "snapshot":
         out = jobs.snapshot()
         return send(h, 200 if out["ok"] else 500, out)
+    if job == "grade":
+        out = jobs.grade()
+        # pending verification is normal early in the morning; only hard errors are a 500
+        hard = {k: v for k, v in out["errors"].items() if "will retry" not in v}
+        return send(h, 500 if hard else 200, out)
     send(h, 400, {"ok": False, "error": "unknown job"})
 
 

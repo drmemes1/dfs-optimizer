@@ -36,6 +36,21 @@ def probe(url, n=600):
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         q = query(self)
+        if q.get("boxday"):   # read-only: parse + verify a day's box scores, write nothing
+            from datetime import date
+            from dfs.sources import boxscores
+            y, m, d = int(q["boxday"][:4]), int(q["boxday"][4:6]), int(q["boxday"][6:8])
+            day = boxscores.fetch_day(date(y, m, d))
+            out = {"games": len(day["games"]), "bref_finals": len(day["bref"]), "verification": {}}
+            for g in day["games"]:
+                box = day["boxes"].get(g["event_id"], {})
+                label = "@".join(sorted(g["teams"]))
+                out["verification"][label] = {
+                    "problems": boxscores.verify_game(g, box, day["bref"]) or "verified",
+                    "minutes": {t: sum(r["min"] for r in rows) for t, rows in box.items()},
+                    "top": sorted(([r["name"], r["min"], r["pts"], r["dk_pts"]] for rows in box.values() for r in rows),
+                                  key=lambda x: -x[3])[:2]}
+            return send(self, 200, out)
         if q.get("url"):
             return send(self, 200, probe(q["url"], int(q.get("n", 4000))))
         send(self, 200, {u: probe(u) for u in URLS})

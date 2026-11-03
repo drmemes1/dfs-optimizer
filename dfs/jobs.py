@@ -60,3 +60,36 @@ def recent_runs(conn, limit=5):
         cur.execute("""SELECT job, started_at, finished_at, ok, summary, errors FROM job_runs
                        ORDER BY started_at DESC LIMIT %s""", (limit,))
         return cur.fetchall()
+
+
+def grade(today=None, fetch_day=None) -> dict:
+    """Grade every recent slate that has no grade yet. Unverified games are retried on the next run."""
+    from datetime import datetime as _dt
+    from . import grading, history
+    from .sources import boxscores
+    today = today or history.et_date(_dt.now(timezone.utc))
+    fetch_day = fetch_day or boxscores.fetch_day
+    with db.connect() as conn:
+        db.migrate(conn)
+        rid = _start(conn, "grade")
+        errors, summary = {}, {"slates": []}
+        days = {}
+        for sid in grading.slates_to_grade(conn, today):
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT date FROM slates WHERE id=%s", (sid,))
+                    d = cur.fetchone()["date"]
+                if d not in days:
+                    days[d] = fetch_day(d)
+                rep = grading.grade_slate(conn, sid, days[d])
+                pending = {g: v for g, v in rep["games"].items() if v != "verified"}
+                summary["slates"].append({"slate_id": sid, "date": str(d), "complete": rep["complete"],
+                                          "pending": pending,
+                                          "mae": (rep.get("grade") or {}).get("mae_ours")})
+                if pending:
+                    errors[f"slate_{sid}"] = f"{len(pending)} game(s) not verified yet; will retry"
+            except Exception as e:  # noqa: BLE001 - recorded on the run
+                errors[f"slate_{sid}"] = f"{type(e).__name__}: {e}"[:300]
+        ok = not errors
+        _finish(conn, rid, ok, summary, errors)
+    return {"ok": ok, "summary": summary, "errors": errors}

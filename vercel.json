@@ -1,5 +1,13 @@
 {
   "functions": {
-    "api/**/*.py": { "maxDuration": 300 }
-  }
+    "api/**/*.py": {
+      "maxDuration": 300
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron?job=grade",
+      "schedule": "30 14 * * *"
+    }
+  ]
 }
