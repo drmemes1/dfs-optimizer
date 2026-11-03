@@ -95,6 +95,18 @@
       <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
       <button class="primary" id="buildBtn" type="submit">Build</button>
     </form>
+    <details id="contestDetails">
+      <summary>Contest these lineups are for</summary>
+      <div class="row">
+        <label>Contest name <input id="cName" placeholder="NBA $20K Shot"></label>
+        <label>Entry fee $ <input type="number" id="cFee" min="0" step="any"></label>
+        <label>Field size <input type="number" id="cField" min="1"></label>
+        <label>Payouts <select id="cTop"><option value="">–</option><option value="top_heavy">Top-heavy GPP</option>
+          <option value="flat">Flatter GPP</option><option value="double_up">Double-up</option><option value="fifty_fifty">50/50</option></select></label>
+        <label>Entry type <select id="cMode"><option value="">–</option><option value="SE">Single entry</option><option value="ME">Multi-entry</option></select></label>
+        <label>Max entries <input type="number" id="cMax" min="1"></label>
+      </div>
+    </details>
     <details id="consDetails">
       <summary>Constraints (defaults from params v<span id="pv">–</span>)</summary>
       <div class="cons-grid" id="consGrid"></div>
@@ -127,6 +139,23 @@
     <div id="costMsg"></div>
     <div class="tabs" id="modeTabs"></div>
     <div class="lineups" id="lineups"></div>
+  </section>
+
+  <section>
+    <h2>Contest results</h2>
+    <p class="muted small" style="margin:0 0 8px">After the slate, open the contest on DraftKings and download the standings CSV
+      (contest-standings-<i>id</i>.csv). It records actual ownership, the full field's scores, and your finishes. Your entries
+      are matched to the lineups saved here and graded.</p>
+    <div class="row">
+      <label>Standings CSV <input type="file" id="stFile" accept=".csv,text/csv"></label>
+      <label>Your DK username <input id="stUser" placeholder="drmemes1"></label>
+      <label>Contest name <input id="stName"></label>
+      <label>Entry fee $ <input type="number" id="stFee" step="any"></label>
+      <label>Prize pool $ <input type="number" id="stPool" step="any"></label>
+      <label>Places paid <input type="number" id="stPaid"></label>
+      <button class="primary" type="button" id="stBtn">Import results</button>
+    </div>
+    <div id="stMsg" style="margin-top:8px"></div>
   </section>
 
   <section id="poolSec" hidden>
@@ -195,6 +224,12 @@ async function loadParams() {
     $("consGrid").innerHTML = '<span></span><b>GPP</b><b>Cash</b>' + CONS.map(([k, label]) =>
       `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="muted">n/a</span>' : cell("CASH", k)}`).join("");
   } catch (e) { /* db not ready */ }
+}
+
+function contestCtx() {
+  const c = { name: $("cName").value, entry_fee: $("cFee").value, field_size: $("cField").value,
+              top_heaviness: $("cTop").value, entry_mode: $("cMode").value, max_entries: $("cMax").value };
+  return Object.values(c).some(v => v !== "") ? c : null;
 }
 
 function overrides() {
@@ -379,7 +414,7 @@ $("rebuildBtn").onclick = async () => {
   const b = $("rebuildBtn"); b.disabled = true; b.textContent = "Rebuilding…";
   try {
     await post("/api/build", { action: "rebuild", slate_id: current.slate.id, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value,
-      overrides: overrides(), locks: [...locks], excludes: [...excludes] });
+      overrides: overrides(), locks: [...locks], excludes: [...excludes], contest: contestCtx() });
     await loadSlate(current.slate.id); $("slateSec").scrollIntoView({ behavior: "smooth" });
   } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = "Rebuild"; }
 };
@@ -390,7 +425,7 @@ $("buildForm").onsubmit = async (e) => {
   btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
   try {
     const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, rg_b64: await fileB64(rg), rg_name: rg.name,
-      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides() });
+      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx() });
     const w = j.warnings, notes = [];
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
@@ -403,6 +438,24 @@ $("buildForm").onsubmit = async (e) => {
     await loadSlates(j.slate_id); await loadSlate(j.slate_id);
   } catch (err) { msg.innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
   finally { btn.disabled = false; }
+};
+
+try { $("stUser").value = localStorage.getItem("dkUser") || ""; } catch (e) { /* storage unavailable */ }
+$("stBtn").onclick = async () => {
+  const f = $("stFile").files[0];
+  if (!f) { $("stMsg").textContent = "Choose the standings CSV first."; return; }
+  try { localStorage.setItem("dkUser", $("stUser").value.trim()); } catch (e) { /* ignore */ }
+  $("stBtn").disabled = true; $("stMsg").textContent = "Importing…";
+  try {
+    const j = await post("/api/build", { action: "import_contest", csv_b64: await fileB64(f), filename: f.name,
+      meta: { dk_username: $("stUser").value.trim(), name: $("stName").value, entry_fee: $("stFee").value || null,
+              prize_pool: $("stPool").value || null, places_paid: $("stPaid").value || null } });
+    $("stMsg").innerHTML = `<div class="msg">Contest ${j.contest_id}: ${j.entries.toLocaleString()} entries · winning score ${fmt(j.winning_score)}
+      ${j.min_cash_score != null ? "· min-cash " + fmt(j.min_cash_score) : ""} · your entries ${j.mine} (${j.matched_to_saved_lineups} matched to saved lineups)
+      · ownership for ${j.ownership_rows} players.${j.warnings.length ? "<br><span class='warn'>" + esc(j.warnings.join(" · ")) + "</span>" : ""}</div>`;
+    if (j.slate_id) await loadSlate(j.slate_id);
+  } catch (e) { $("stMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally { $("stBtn").disabled = false; }
 };
 
 setInterval(() => { if (current) renderGames(); }, 30000);

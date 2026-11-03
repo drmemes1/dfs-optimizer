@@ -201,20 +201,23 @@ def save_pages(cur, slate_id, lineup_src: dict | None):
                      json.dumps({"bytes": len(html), "gzip": True})))
 
 
-def save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, params_version, key_to_pid) -> str:
+def save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, params_version, key_to_pid,
+                 contest=None) -> str:
     run_id = uuid.uuid4()
     for mode, lus in lineups.items():
         for rank, lu in enumerate(lus, 1):
             for x in lu["players"]:
                 x["player_id"] = key_to_pid.get(x["key"])
             cur.execute("""INSERT INTO lineups(slate_id, mode, run_id, rank, params_version, salary, proj, ceil,
-                                               own_sum, players, settings, locks, excludes, cost_vs_unconstrained)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                               own_sum, players, settings, locks, excludes, cost_vs_unconstrained,
+                                               contest_context)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (slate_id, mode, run_id, rank, params_version, lu["salary"], lu["proj"], lu["ceil"],
                          lu["own_sum"], json.dumps(lu["players"], default=str),
                          json.dumps(used.get("GPP" if mode == "CONSENSUS" else mode)),
                          json.dumps(sorted(locks)), json.dumps(sorted(excludes)),
-                         json.dumps(costs.get(mode)) if rank == 1 and costs.get(mode) else None))
+                         json.dumps(costs.get(mode)) if rank == 1 and costs.get(mode) else None,
+                         json.dumps(contest) if contest else None))
     return str(run_id)
 
 
@@ -260,7 +263,7 @@ def _summary(prep):
 
 
 def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(),
-              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None) -> dict:
+              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None, contest=None) -> dict:
     overrides = clean_overrides(overrides)
     lineup_src = (fetch or lineup_sources.fetch_all)()
     with db.connect() as conn:
@@ -275,13 +278,13 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
             save_uploads(cur, slate_id, {"dk_salaries_csv": (dk_name, dk_raw or dk_text.encode()),
                                          "rg_projections_csv": (rg_name, rg_raw or rg_text.encode())})
             save_pages(cur, slate_id, lineup_src)
-            run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid)
+            run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, **_summary(prep),
             "costs": costs}
 
 
-def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=()) -> dict:
+def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(), contest=None) -> dict:
     overrides = clean_overrides(overrides)
     with db.connect() as conn:
         db.migrate(conn)
@@ -291,7 +294,7 @@ def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes
             if not players:
                 raise UploadError("that slate has no player pool")
             lineups, costs, used = build_all(players, params, n_gpp, n_cash, overrides, locks, excludes)
-            run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid)
+            run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, "costs": costs,
             "counts": {m: len(v) for m, v in lineups.items()}}
