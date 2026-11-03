@@ -14,25 +14,44 @@
   ~1% per slate, and only if a replay over all stored past slates does not get worse. Frozen keys (ownership knobs, max_from_team, pool rule) are
   never moved automatically.
 
-## Roadmap
-- [x] Core library: signals, pool rule, value board, MILP optimizer, DK scoring, name matching (tested)
+## Roadmap (priority order from the addendum)
+- [x] Core library: signals, pool rule, value board, MILP optimizer, DK scoring, shared name matching (#11)
 - [x] Postgres schema + migrations; Neon connected; params v1 seeded
-- [ ] Upload page + parsers: DKSalaries.csv, RotoGrinders export (FPTS=col 28, not 27), checked against DK lobby
-- [ ] Lineups/Vegas/injuries from RotoGrinders + RotoWire; contingent flag; back-to-back flags
-- [ ] Build job: ingest -> signals -> pool -> GPP/CASH lineups -> value board -> DB (re-runnable)
-- [ ] **News & buzz panel:** latest RotoWire/RotoGrinders player news on the slate page, highlighting
-      players in our lineups and on the value board
-- [ ] Grade job: verified box scores (240/265/290 minutes + score cross-check), actuals, MAE ours vs RG,
-      bucket/game bias, hindsight-perfect lineup, missed plays
-- [ ] **Backfill + Research page:** for a date range, pull verified box scores (StatMuse) and past salaries
-      (user's saved DK CSVs; RotoGuru if available) and import the user's saved RotoGrinders exports/graded
-      results. Reports: value-board hit rates across many slates, hindsight-perfect lineup shapes
-      (salary spread, sub-$5.5K count, game concentration), injury-beneficiary outcomes by salary, and
-      RotoGrinders bias by bucket. Findings are reports only until a backtest proves they help.
-- [ ] Learner: propose bias nudges, replay on past slates, append params with evidence; "What changed" page
-- [ ] UI: slate page (lineups, value board A-D, injury watch, news & buzz), accuracy chart, DK CSV export,
-      history browser
-- [ ] Vercel Cron (build + grade) and a manual re-run button; preview review, then production
+- [x] Upload page + parsers (DKSalaries.csv; RotoGrinders by header name, never the PrizePicks column)
+- [x] Build job: signals -> pool -> GPP/CASH/Consensus/Max-projection lineups -> value board -> DB
+- [x] #1 Late-scratch checker: per-game lock time from DKSalaries.csv Game Info, countdown, "Re-check
+      inactives" (fresh RG upload) flags Out/Doubtful/Questionable/no-projection players in saved and
+      entered lineups with same-slot swaps that fit the salary left and haven't tipped
+- [x] #2 Lock / Exclude per player + Rebuild, showing the projection cost vs the unconstrained build
+- [x] #3 Constraint controls on the form (max_from_team, max_from_game, max_own_sum, min_salary,
+      min_uniques, ceil_weight, own_penalty), defaulted from params, not written back to params
+- [x] #4 Exact uploaded bytes archived per slate (bytea + sha256)
+- [x] #5 Mark as entered; validated swaps keep the generated version (players_original)
+- [x] #6 (part) Full pool snapshot per build/refresh; each signal multiplier in its own column
+- [x] #7 (part) Every lineup records params_version; params rows carry kind + per-key changes
+- [x] #15 Phone layout (no sideways scroll; lineup cards and value board usable at 390px)
+- [x] Consensus lineup: most-picked players across the GPP set, all rules applied
+- [ ] Starting lineups (RotoGrinders + RotoWire cross-check -> starter_consensus, contingent), Vegas lines
+      (#10: pace_exponent 0.5, totals never a stacking reason, per-game bias stored), back-to-back flags.
+      Priority: consensus starter was the strongest measured predictor (73% vs 20% on cheap plays).
+- [ ] #6 Grading job: box scores accepted only if each team's minutes == 240/265/290 AND summed points ==
+      the final score from an independent source; grade the *entered* version of each lineup
+- [ ] #12 Hindsight-optimal lineup per slate (ceiling, salary used, structure vs projection error)
+- [ ] #7 Learner: nudges only from measured bias, <=1% per key per slate, minimum sample enforced in code,
+      replay over all stored slates must not get worse, append params with old -> new and why
+- [ ] #8 Recent-form check: implied DK pts/min vs last-5/last-10 actual rate, flag >15% required increase
+      (needs a reachable game-log source; cdn.nba.com is blocked from Vercel)
+- [ ] News & buzz panel; backfill + Research page; accuracy-over-time chart
+- [ ] #13 Automation: uploads stay manual (RotoGrinders is behind a login; no stored credentials). Cron
+      only for jobs whose sources are reachable (grading), and every job reports failures visibly.
+- [ ] #14 If the RG projections *page* is ever parsed: split each <tr> innerText on tabs (not
+      querySelectorAll('td')); FPTS=28, FPTS/$=29, pOWN=30, FLOOR=33, CEIL=34, SIM85=44; "-" = no tag.
+- Production deploy can wait; preview + the real database is the working setup for now.
+
+## Binding rules
+- #9 No value-play filters. Pool rule stays: salary >= 5500 OR consensus starter OR 24+ minutes.
+- Nudges from measured bias only; no hand-tuned changes without a graded result. Data-integrity guards
+  (starter consensus, name matching, box-score verification) are always on.
 
 ## Later / to be tested before it influences lineups
 - **Buzz signal:** log per-player mention counts from Reddit r/dfsports (free for personal use) without

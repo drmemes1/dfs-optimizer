@@ -7,14 +7,16 @@
 <style>
   :root {
     --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
-    --accent: #2c5fd4; --accent-ink: #ffffff; --warn: #a15c00; --bad: #b3261e;
+    --accent: #2c5fd4; --accent-ink: #ffffff; --warn: #a15c00; --warn-bg: #fbf0dc; --bad: #b3261e; --bad-bg: #fbe6e4;
+    --good: #1f7a3d;
     --gA: #1f7a3d; --gA-bg: #e3f3e8; --gB: #2c5fd4; --gB-bg: #e6edfb;
     --gC: #9a6400; --gC-bg: #fbf0dc; --gD: #6b6b66; --gD-bg: #efeeea;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #151514; --panel: #1e1e1c; --ink: #ecebe6; --muted: #a3a29b; --line: #34332f;
-      --accent: #7aa2ff; --accent-ink: #0f1a33; --warn: #e3a54a; --bad: #ff8a80;
+      --accent: #7aa2ff; --accent-ink: #0f1a33; --warn: #e3a54a; --warn-bg: #3a2c12; --bad: #ff8a80; --bad-bg: #3d1d1a;
+      --good: #6fd38f;
       --gA: #6fd38f; --gA-bg: #183323; --gB: #8fb0ff; --gB-bg: #1c2742;
       --gC: #e9b25c; --gC-bg: #3a2c12; --gD: #a3a29b; --gD-bg: #2a2a27;
     }
@@ -26,21 +28,24 @@
            padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { font-size: 17px; margin: 0; }
   main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  main, section { min-width: 0; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   h2 { font-size: 15px; margin: 0 0 10px; }
   .muted { color: var(--muted); }
-  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .small { font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   label { min-width: 0; max-width: 100%; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-  input[type=number] { width: 72px; }
+  input[type=number] { width: 80px; }
   input[type=file] { max-width: 100%; }
-  .card { overflow-x: auto; }
-  @media (max-width: 480px) { .card td:nth-child(3) { display: none; } }
-  main, section { min-width: 0; }
   input, select, button { font: inherit; color: var(--ink); background: var(--bg);
                           border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); cursor: pointer; }
   button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.sm { padding: 2px 7px; font-size: 12px; }
   button:disabled { opacity: .5; cursor: progress; }
+  button[aria-pressed=true].lock { background: var(--gA-bg); color: var(--good); border-color: var(--good); }
+  button[aria-pressed=true].excl { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+  details > summary { cursor: pointer; color: var(--accent); margin: 10px 0 6px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .tabs button[aria-pressed=true] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
   .scroll { overflow-x: auto; }
@@ -48,17 +53,29 @@
   th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { font-size: 12px; color: var(--muted); font-weight: 600; }
   td.n, th.n { text-align: right; }
-  .lineups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr)); }
-  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-  .card .meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .lineups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+  .card.entered { border-color: var(--good); box-shadow: inset 3px 0 0 var(--good); }
+  .card .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   .card td { padding: 3px 6px; }
+  .card tr.flag td { background: var(--bad-bg); }
+  .card tr.locked td:first-child::after { content: " 🔒"; }
+  .card td.subs { font-size: 12px; padding: 4px 6px 8px; background: var(--bad-bg); white-space: normal; }
+  .subs button { margin: 2px 4px 2px 0; }
   .grade { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; border-radius: 4px; padding: 0 5px; }
   .gA { color: var(--gA); background: var(--gA-bg); } .gB { color: var(--gB); background: var(--gB-bg); }
   .gC { color: var(--gC); background: var(--gC-bg); } .gD { color: var(--gD); background: var(--gD-bg); }
-  .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .warn { color: var(--warn); } .bad { color: var(--bad); } .good { color: var(--good); }
   .msg { padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+  .msg.alert { background: var(--warn-bg); border-color: var(--warn); }
+  .games { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .game { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+  .game.soon { border-color: var(--warn); color: var(--warn); }
+  .game.locked { color: var(--muted); text-decoration: line-through; }
+  .cons-grid { display: grid; grid-template-columns: auto repeat(2, 90px); gap: 4px 10px; align-items: center; font-size: 12px; }
   .two { display: grid; gap: 16px; grid-template-columns: 1fr; }
   @media (min-width: 900px) { .two { grid-template-columns: 3fr 2fr; } }
+  @media (max-width: 480px) { .card td.team { display: none; } }
 </style>
 </head>
 <body>
@@ -78,6 +95,12 @@
       <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
       <button class="primary" id="buildBtn" type="submit">Build</button>
     </form>
+    <details id="consDetails">
+      <summary>Constraints (defaults from params v<span id="pv">–</span>)</summary>
+      <div class="cons-grid" id="consGrid"></div>
+      <p class="muted small" style="margin:6px 0 0">Changes apply to the next Build or Rebuild only; the stored params are not edited.
+        Ownership knobs are measured values; change them only with a graded result behind it.</p>
+    </details>
     <div id="buildMsg" style="margin-top:10px"></div>
   </section>
 
@@ -85,19 +108,47 @@
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
       <h2 id="slateTitle" style="margin:0"></h2>
       <div class="row">
-        <a id="exGpp"><button type="button">DK upload CSV · GPP</button></a>
-        <a id="exCash"><button type="button">DK upload CSV · Cash</button></a>
+        <button type="button" id="checkBtn">Re-check inactives</button>
+        <a id="exMode"><button type="button" id="exModeBtn">DK upload CSV</button></a>
+        <a id="exEntered"><button type="button">DK CSV · entered only</button></a>
       </div>
     </div>
+    <div class="games" id="games"></div>
+    <div id="recheck" hidden class="msg" style="margin-bottom:10px">
+      <div class="row">
+        <label>Fresh RotoGrinders export <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
+        <label>DKSalaries.csv (optional) <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
+        <button class="primary" type="button" id="refreshBtn">Update statuses &amp; check</button>
+        <button type="button" id="checkOnlyBtn">Check without new file</button>
+      </div>
+      <div id="checkMsg" style="margin-top:8px"></div>
+    </div>
+    <div id="costMsg"></div>
     <div class="tabs" id="modeTabs"></div>
     <div class="lineups" id="lineups"></div>
+  </section>
+
+  <section id="poolSec" hidden>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">Player pool · lock / exclude</h2>
+      <div class="row">
+        <input type="search" id="poolSearch" placeholder="Find player or team">
+        <span class="muted small" id="lockCount"></span>
+        <button type="button" id="clearLE">Clear</button>
+        <button class="primary" type="button" id="rebuildBtn">Rebuild</button>
+      </div>
+    </div>
+    <p class="muted small" style="margin:6px 0 8px">Rebuild uses the stored pool with your locks, excludes and constraints, and shows what the
+      top lineup gives up in projection versus the unconstrained build.</p>
+    <div class="scroll" style="max-height:420px;overflow-y:auto"><table id="poolTable"></table></div>
   </section>
 
   <div class="two" id="lowerSec" hidden>
     <section>
       <h2>Value board <span class="muted" style="font-weight:400">· sub-$5,500, 12+ min</span></h2>
-      <p class="muted" style="margin:0 0 8px;font-size:12px">Boxes: consensus starter · 24+ projected minutes · value 5.0+.
-        A = all three (core value), B = two, C = one, D = lottery ticket.</p>
+      <p class="muted small" style="margin:0 0 8px">Boxes: consensus starter · 24+ projected minutes · value 5.0+.
+        A = all three, B = two, C = one, D = lottery ticket. <span class="warn">Starting lineups are not connected yet:
+        check every cheap play's role by hand.</span></p>
       <div class="scroll"><table id="board"></table></div>
     </section>
     <section>
@@ -111,7 +162,12 @@ const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 1) => (v === null || v === undefined || v === "") ? "–" : Number(v).toFixed(d);
 const money = (v) => "$" + Number(v).toLocaleString();
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let current = null, mode = "GPP";
+const MODES = [["GPP", "GPP"], ["CASH", "Cash"], ["CONSENSUS", "Consensus"], ["OPTIMAL", "Max projection"]];
+const CONS = [["min_salary", "Min salary"], ["max_from_team", "Max from team"], ["max_per_game", "Max from game"],
+              ["max_own_sum", "Max ownership sum"], ["min_uniques", "Min uniques"], ["ceil_weight", "Ceiling weight"],
+              ["own_penalty", "Ownership penalty"]];
+let current = null, mode = "GPP", params = null, checkResult = null;
+let locks = new Set(), excludes = new Set();
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -119,49 +175,150 @@ async function api(path, opts) {
   if (!r.ok || j.ok === false) throw new Error(j.error + (j.detail ? ": " + j.detail : ""));
   return j;
 }
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+async function fileB64(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let s = ""; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function loadParams() {
+  try {
+    const j = await api("/api/slate?params=1"); params = j.params; $("pv").textContent = j.version;
+    const cell = (m, k) => {
+      const v = params[m]?.[k];
+      return `<input type="number" step="any" data-m="${m}" data-k="${k}" value="${v ?? ""}" placeholder="${v ?? "–"}">`;
+    };
+    const gppOnly = ["max_own_sum", "ceil_weight", "own_penalty"];
+    $("consGrid").innerHTML = '<span></span><b>GPP</b><b>Cash</b>' + CONS.map(([k, label]) =>
+      `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="muted">n/a</span>' : cell("CASH", k)}`).join("");
+  } catch (e) { /* db not ready */ }
+}
+
+function overrides() {
+  const o = { GPP: {}, CASH: {} };
+  $("consGrid").querySelectorAll("input").forEach(i => {
+    if (i.value !== "" && params && String(params[i.dataset.m]?.[i.dataset.k]) !== i.value) o[i.dataset.m][i.dataset.k] = +i.value;
+  });
+  return o;
+}
 
 async function loadSlates(selectId) {
   try {
     const j = await api("/api/slate?list=1");
-    const pick = $("slatePick");
-    pick.innerHTML = '<option value="">Latest</option>' + j.slates.map(s =>
+    $("slatePick").innerHTML = '<option value="">Latest</option>' + j.slates.map(s =>
       `<option value="${s.id}">${s.date} · ${s.n_games} games</option>`).join("");
-    if (selectId) pick.value = String(selectId);
-  } catch (e) { /* no slates yet */ }
+    if (selectId) $("slatePick").value = String(selectId);
+  } catch (e) { /* none yet */ }
 }
 
 async function loadSlate(id) {
   try {
-    const j = await api("/api/slate" + (id ? "?id=" + id : ""));
-    current = j; render();
-  } catch (e) {
-    $("slateSec").hidden = true; $("lowerSec").hidden = true;
-  }
+    current = await api("/api/slate" + (id ? "?id=" + id : ""));
+    const lu = Object.values(current.lineups)[0]?.[0];
+    locks = new Set((lu?.locks || []).map(Number)); excludes = new Set((lu?.excludes || []).map(Number));
+    checkResult = null; render();
+  } catch (e) { ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = true); }
+}
+
+function tipInfo(start) {
+  const ms = new Date(start) - Date.now();
+  if (ms <= 0) return { locked: true, text: "locked" };
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  return { locked: false, soon: ms < 30 * 60000, text: d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m` };
+}
+
+function renderGames() {
+  const s = current.slate;
+  $("games").innerHTML = (s.game_list || []).map(g => {
+    const t = tipInfo(g.start), local = new Date(g.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return `<span class="game ${t.locked ? "locked" : t.soon ? "soon" : ""}">${esc(g.game)} · ${local} · ${t.text}</span>`;
+  }).join("");
+}
+
+function flagsFor(lineupId) {
+  return (checkResult?.flags || []).filter(f => f.lineup_id === lineupId);
+}
+
+function lineupCard(lu) {
+  const flags = flagsFor(lu.id), fk = new Map(flags.map(f => [f.key, f]));
+  const rows = lu.players.map(p => {
+    const f = fk.get(p.key), locked = p.game_start && new Date(p.game_start) <= Date.now();
+    const subs = f && !f.locked && f.suggestions.length ? `<tr><td colspan="7" class="subs">Swap ${esc(p.name)} (${esc(f.status)}) for:
+        ${f.suggestions.map(s => `<button class="sm" data-swap="${lu.id}:${p.key}:${s.key}">${esc(s.name)} ${money(s.salary)} · ${fmt(s.proj)} (${s.proj_delta >= 0 ? "+" : ""}${fmt(s.proj_delta)})</button>`).join("")}</td></tr>`
+      : f && f.locked ? `<tr><td colspan="7" class="subs">${esc(p.name)} is ${esc(f.status)} but his game has tipped; DK has him locked.</td></tr>` : "";
+    return `<tr class="${f ? "flag" : ""} ${locked ? "locked" : ""}"><td class="muted">${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
+      <td class="muted team">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj)}</td>
+      <td class="n muted">${fmt(p.own, 1)}%</td>${p.exposure !== undefined ? `<td class="n muted">${Math.round(p.exposure * 100)}%</td>` : "<td></td>"}</tr>${subs}`;
+  }).join("");
+  return `<div class="card ${lu.entered ? "entered" : ""}">
+    <div class="meta"><b style="color:var(--ink)">${lu.mode === "CONSENSUS" ? "Consensus" : "#" + lu.rank}</b><span>${money(lu.salary)}</span>
+      <span>proj ${fmt(lu.proj)}</span><span>ceil ${fmt(lu.ceil)}</span><span>own ${fmt(lu.own_sum, 0)}%</span>
+      ${lu.edited ? '<span class="warn">edited</span>' : ""}
+      ${lu.actual_score != null ? `<span>actual <b style="color:var(--ink)">${fmt(lu.actual_score)}</b></span>` : ""}
+      <label style="display:flex;gap:4px;align-items:center;margin-left:auto;color:var(--ink)"><input type="checkbox" data-entered="${lu.id}" ${lu.entered ? "checked" : ""}> entered</label></div>
+    ${lu.mode === "CONSENSUS" ? '<div class="muted small">Last column: share of GPP lineups using the player.</div>' : ""}
+    <table>${rows}</table></div>`;
 }
 
 function render() {
   const s = current.slate;
-  $("slateSec").hidden = false; $("lowerSec").hidden = false;
-  const games = (s.game_list || []).map(g => g.game).join(", ");
-  $("slateTitle").innerHTML = `${esc(s.date)} · ${s.n_games} games <span class="muted" style="font-weight:400;font-size:12px">${esc(games)}</span>`;
-  $("exGpp").href = `/api/slate?id=${s.id}&export=GPP`;
-  $("exCash").href = `/api/slate?id=${s.id}&export=CASH`;
-  const modes = ["GPP", "CASH", "OPTIMAL"].filter(m => current.lineups[m]);
-  if (!modes.includes(mode)) mode = modes[0] || "GPP";
-  $("modeTabs").innerHTML = modes.map(m =>
-    `<button type="button" aria-pressed="${m === mode}" data-m="${m}">${m === "OPTIMAL" ? "Max projection" : m} (${current.lineups[m].length})</button>`).join("");
+  ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = false);
+  $("slateTitle").innerHTML = `${esc(s.date)} · ${s.n_games} games <span class="muted small" style="font-weight:400">built ${current.run ? new Date(current.run.built_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"} · params v${current.run?.params_version ?? "–"}</span>`;
+  renderGames();
+  const modes = MODES.filter(([m]) => current.lineups[m]);
+  if (!modes.some(([m]) => m === mode)) mode = modes[0]?.[0] || "GPP";
+  $("modeTabs").innerHTML = modes.map(([m, label]) =>
+    `<button type="button" aria-pressed="${m === mode}" data-m="${m}">${label} (${current.lineups[m].length})</button>`).join("");
   $("modeTabs").querySelectorAll("button").forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+  $("exMode").href = `/api/slate?id=${s.id}&export=${mode}`;
+  $("exModeBtn").textContent = `DK upload CSV · ${MODES.find(([m]) => m === mode)?.[1] || mode}`;
+  $("exEntered").href = `/api/slate?id=${s.id}&export=ENTERED`;
 
-  $("lineups").innerHTML = (current.lineups[mode] || []).map(lu => `
-    <div class="card">
-      <div class="meta"><b style="color:var(--ink)">#${lu.rank}</b><span>${money(lu.salary)}</span>
-        <span>proj ${fmt(lu.proj)}</span><span>ceil ${fmt(lu.ceil)}</span><span>own ${fmt(lu.own_sum, 0)}%</span>
-        ${lu.actual_score != null ? `<span>actual <b style="color:var(--ink)">${fmt(lu.actual_score)}</b></span>` : ""}</div>
-      <table>${lu.players.map(p => `<tr><td class="muted">${p.slot}</td><td>${esc(p.name)}</td>
-        <td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
-        <td class="n">${fmt(p.proj)}</td><td class="n muted">${fmt(p.own, 1)}%</td></tr>`).join("")}</table>
-    </div>`).join("") || '<p class="muted">No lineups for this mode.</p>';
+  const cost = current.lineups[mode]?.[0]?.cost_vs_unconstrained;
+  const lk = current.lineups[mode]?.[0];
+  $("costMsg").innerHTML = cost ? `<div class="msg alert" style="margin-bottom:10px">Locks/excludes cost the top ${esc(mode)} lineup
+      <b>${cost.proj >= 0 ? "+" : ""}${fmt(cost.proj)} proj</b> (objective ${cost.objective >= 0 ? "+" : ""}${fmt(cost.objective)}) versus the
+      unconstrained build (${fmt(cost.unconstrained_proj)}). Locked ${lk.locks.length}, excluded ${lk.excludes.length}.</div>` : "";
 
+  const entered = (current.entered_other_runs || []).filter(l => l.mode === mode);
+  $("lineups").innerHTML = (current.lineups[mode] || []).map(lineupCard).join("") +
+    (entered.length ? `<div class="muted small" style="grid-column:1/-1">Entered from earlier builds:</div>` + entered.map(lineupCard).join("") : "") ||
+    '<p class="muted">No lineups for this mode.</p>';
+  $("lineups").querySelectorAll("[data-entered]").forEach(cb => cb.onchange = async () => {
+    try { await post("/api/lineup", { id: +cb.dataset.entered, action: "entered", value: cb.checked }); await loadSlate(s.id); }
+    catch (e) { alert(e.message); cb.checked = !cb.checked; }
+  });
+  $("lineups").querySelectorAll("[data-swap]").forEach(b => b.onclick = async () => {
+    const [id, out, inn] = b.dataset.swap.split(":").map(Number);
+    b.disabled = true;
+    try { await post("/api/lineup", { id, action: "swap", out_key: out, in_key: inn });
+          const keep = checkResult; await loadSlate(s.id); checkResult = keep && (await api(`/api/slate?id=${s.id}&check=1`)); render(); }
+    catch (e) { alert(e.message); b.disabled = false; }
+  });
+  renderPool(); renderLower();
+}
+
+function renderPool() {
+  const q = $("poolSearch").value.trim().toLowerCase();
+  const rows = current.pool.filter(p => !q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q);
+  $("lockCount").textContent = `${locks.size} locked · ${excludes.size} excluded`;
+  $("poolTable").innerHTML = `<tr><th></th><th>Player</th><th>Pos</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
+      <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
+    rows.slice(0, 300).map(p => `<tr><td><button class="sm lock" aria-pressed="${locks.has(p.key)}" data-lock="${p.key}">Lock</button>
+        <button class="sm excl" aria-pressed="${excludes.has(p.key)}" data-excl="${p.key}">Exclude</button></td>
+      <td>${esc(p.name)}</td><td class="muted">${esc(p.pos)}</td><td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
+      <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
+      <td class="n muted">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
+  $("poolTable").querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {
+    const k = +b.dataset.lock; locks.has(k) ? locks.delete(k) : (locks.add(k), excludes.delete(k)); renderPool(); });
+  $("poolTable").querySelectorAll("[data-excl]").forEach(b => b.onclick = () => {
+    const k = +b.dataset.excl; excludes.has(k) ? excludes.delete(k) : (excludes.add(k), locks.delete(k)); renderPool(); });
+}
+
+function renderLower() {
   $("board").innerHTML = `<tr><th>Grade</th><th>Player</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
       <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th></tr>` +
     current.value_board.map(p => `<tr><td><span class="grade g${p.value_grade}">${p.value_grade}</span></td>
@@ -169,37 +326,70 @@ function render() {
       <td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.minutes, 0)}</td>
       <td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
       <td class="n muted">${fmt(p.own_pct)}%${p.own_estimated ? "*" : ""}</td></tr>`).join("");
-
   $("watch").innerHTML = current.watch.length ? `<tr><th>Player</th><th>Team</th><th>Status</th><th class="n">Salary</th><th class="n">Proj (adj)</th></tr>` +
     current.watch.map(p => `<tr><td>${esc(p.name)}</td><td class="muted">${esc(p.team)}</td>
-      <td class="${p.contingent ? "bad" : "warn"}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td>
+      <td class="${p.contingent || ["O", "OUT", "NOPROJ"].includes(p.inj_status) ? "bad" : "warn"}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td>
       <td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj_adj)}</td></tr>`).join("")
     : '<tr><td class="muted">Nobody flagged.</td></tr>';
 }
 
+function showCheck(res) {
+  checkResult = res;
+  const live = res.flags.filter(f => !f.locked);
+  $("checkMsg").innerHTML = res.flags.length
+    ? `<span class="bad"><b>${res.flags.length}</b> flagged spot${res.flags.length > 1 ? "s" : ""}</span> in ${res.checked_lineups} lineups
+       (${live.length} still swappable). Swap buttons are under each flagged player.`
+    : `<span class="good">All clear</span>: nobody in ${res.checked_lineups} saved lineups is Out, Doubtful, Questionable or missing a projection.`;
+  render();
+}
+
 $("slatePick").onchange = (e) => loadSlate(e.target.value);
+$("poolSearch").oninput = () => renderPool();
+$("clearLE").onclick = () => { locks.clear(); excludes.clear(); renderPool(); };
+$("checkBtn").onclick = () => { $("recheck").hidden = !$("recheck").hidden; };
+$("checkOnlyBtn").onclick = async () => {
+  try { showCheck(await api(`/api/slate?id=${current.slate.id}&check=1`)); } catch (e) { $("checkMsg").textContent = e.message; }
+};
+$("refreshBtn").onclick = async () => {
+  const rg = $("rgFresh").files[0], dk = $("dkFresh").files[0];
+  if (!rg) { $("checkMsg").textContent = "Choose a fresh RotoGrinders export first."; return; }
+  $("refreshBtn").disabled = true; $("checkMsg").textContent = "Updating statuses…";
+  try {
+    const j = await post("/api/build", { action: "refresh", slate_id: current.slate.id, rg_b64: await fileB64(rg), rg_name: rg.name,
+      ...(dk ? { dk_b64: await fileB64(dk), dk_name: dk.name } : {}) });
+    await loadSlate(j.slate_id); showCheck(j.check);
+  } catch (e) { $("checkMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally { $("refreshBtn").disabled = false; }
+};
+$("rebuildBtn").onclick = async () => {
+  const b = $("rebuildBtn"); b.disabled = true; b.textContent = "Rebuilding…";
+  try {
+    await post("/api/build", { action: "rebuild", slate_id: current.slate.id, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value,
+      overrides: overrides(), locks: [...locks], excludes: [...excludes] });
+    await loadSlate(current.slate.id); $("slateSec").scrollIntoView({ behavior: "smooth" });
+  } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = "Rebuild"; }
+};
 
 $("buildForm").onsubmit = async (e) => {
   e.preventDefault();
-  const btn = $("buildBtn"), msg = $("buildMsg");
+  const btn = $("buildBtn"), msg = $("buildMsg"), dk = $("dkFile").files[0], rg = $("rgFile").files[0];
   btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
   try {
-    const [dk, rg] = await Promise.all([$("dkFile").files[0].text(), $("rgFile").files[0].text()]);
-    const j = await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dk_csv: dk, rg_csv: rg, n_gpp: +$("nGpp").value, n_cash: +$("nCash").value }) });
+    const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, rg_b64: await fileB64(rg), rg_name: rg.name,
+      n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides() });
     const w = j.warnings, notes = [];
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
     if (w.own_estimated) notes.push(`<span class="warn">${w.own_estimated} ownership values estimated</span> (not yet published).`);
-    notes.push(`<span class="muted">Starting-lineup source: ${esc(w.starters_source)}.</span>`);
+    notes.push(`<span class="warn">${esc(w.starters_source)}.</span>`);
     msg.innerHTML = `<div class="msg">Built ${j.players} players across ${j.games.length} games · params v${j.params_version}.<br>${notes.join("<br>")}</div>`;
     await loadSlates(j.slate_id); await loadSlate(j.slate_id);
-  } catch (err) {
-    msg.innerHTML = `<div class="msg bad">${esc(err.message)}</div>`;
-  } finally { btn.disabled = false; }
+  } catch (err) { msg.innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
+  finally { btn.disabled = false; }
 };
 
-loadSlates(); loadSlate();
+setInterval(() => { if (current) renderGames(); }, 30000);
+loadParams(); loadSlates(); loadSlate();
 </script>
 </body>
 </html>

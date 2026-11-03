@@ -18,6 +18,7 @@ def _get(h):
     q = query(h)
     with db.connect() as conn:
         db.migrate(conn)
+        db.seed_params(conn)
         if q.get("params"):
             version, params = db.current_params(conn)
             return send(h, 200, {"ok": True, "version": version, "params": params})
