@@ -9,6 +9,7 @@ from dfs.params import default_params
 from dfs.pipeline import build_all, clean_overrides, prepare
 from tests.test_pipeline import synthetic_files
 
+NO_PAGES = lambda: {"rotowire": None, "rg": None, "errors": {"rotowire": "offline test", "rg": "offline test"}, "raw": {}}  # noqa: E731
 BEFORE_TIP = datetime(2026, 11, 2, 20, 0, tzinfo=timezone.utc)   # 3pm ET, before every game
 
 
@@ -47,7 +48,7 @@ def test_refresh_check_swap_entered_and_raw_archive(monkeypatch):
     dk = dk.replace("11/02/2026", "11/09/2026")       # its own slate
     raw = ("﻿" + dk).encode("utf-8")
     dk_text, dk_raw = pipeline.decode_upload(base64.b64encode(raw).decode(), None)
-    out = pipeline.run_build(dk_text, rg, n_gpp=3, n_cash=1, dk_raw=dk_raw, dk_name="DKSalaries.csv")
+    out = pipeline.run_build(dk_text, rg, n_gpp=3, n_cash=1, dk_raw=dk_raw, dk_name="DKSalaries.csv", fetch=NO_PAGES)
     sid = out["slate_id"]
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT raw, sha256 FROM source_snapshots WHERE slate_id=%s AND source='dk_salaries_csv'", (sid,))
@@ -59,7 +60,7 @@ def test_refresh_check_swap_entered_and_raw_archive(monkeypatch):
     # late news: the victim is now OUT in a fresh RotoGrinders export
     lines = rg.splitlines()
     lines = [ln if not ln.startswith(victim["name"] + ",") else ",".join(ln.split(",")[:-1] + ["O"]) for ln in lines]
-    pipeline.run_refresh("\n".join(lines), slate_id=sid)
+    pipeline.run_refresh("\n".join(lines), slate_id=sid, fetch=NO_PAGES, now=BEFORE_TIP)
     with db.connect() as conn:
         res = pipeline.check(conn, sid, now=BEFORE_TIP)
         f = [x for x in res["flags"] if x["lineup_id"] == lu["id"] and x["key"] == victim["key"]]

@@ -9,6 +9,7 @@ swap     validated in-place edit of a saved lineup (original kept)
 Pool rows upsert on (slate_id, player_id); every build/refresh also appends a full pool snapshot.
 Each lineup run gets its own run_id and records params_version, settings, locks and excludes."""
 import base64
+import gzip
 import hashlib
 import json
 import uuid
@@ -19,6 +20,7 @@ from . import db
 from .optimizer import SALARY_CAP, SLOTS, Settings, build_lineups, eligible_slots
 from .pool import eligible_pool, value_board
 from .signals import SIGNAL_COLUMNS, apply_signals, estimate_missing_ownership, is_out, is_questionable
+from .sources import lineups as lineup_sources
 from .sources.uploads import UploadError, merge, parse_dk_salaries, parse_rg_projections
 
 OVERRIDE_KEYS = {"max_from_team": int, "max_per_game": int, "max_own_sum": float, "min_salary": int,
@@ -55,7 +57,7 @@ def clean_overrides(raw: dict | None) -> dict:
 
 
 # ---------------------------------------------------------------- core build
-def prepare(dk_text: str, rg_text: str, params: dict) -> dict:
+def prepare(dk_text: str, rg_text: str, params: dict, lineup_src: dict | None = None) -> dict:
     dk = parse_dk_salaries(dk_text)
     rg = parse_rg_projections(rg_text)
     m = merge(dk, rg)
@@ -64,10 +66,14 @@ def prepare(dk_text: str, rg_text: str, params: dict) -> dict:
     for p in players:
         p["key"] = p["draftable_id"]
         p["game_start"] = starts[p["game"]].isoformat() if p.get("game") in starts else None
+    lineup_report = None
+    if lineup_src is not None:
+        lineup_report = lineup_sources.apply_lineups(players, lineup_src)
+        lineup_report["errors"] = lineup_src.get("errors", {})
     apply_signals(players, params)
     estimate_missing_ownership(players)
     board = value_board(players, params)
-    return {"dk": dk, "merge": m, "players": players, "value_board": board}
+    return {"dk": dk, "merge": m, "players": players, "value_board": board, "lineups": lineup_report}
 
 
 def _settings(params, mode, overrides, locks, excludes) -> Settings:
@@ -185,6 +191,16 @@ def save_uploads(cur, slate_id, files: dict):
                      json.dumps({"bytes": len(raw)})))
 
 
+def save_pages(cur, slate_id, lineup_src: dict | None):
+    """Keep the fetched lineup pages (gzipped) so a slate can be re-derived later."""
+    for key, html in ((lineup_src or {}).get("raw") or {}).items():
+        raw = gzip.compress(html.encode("utf-8"))
+        cur.execute("""INSERT INTO source_snapshots(slate_id, source, filename, raw, sha256, payload)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (slate_id, f"{key}_lineups_html", f"{key}.html.gz", raw, hashlib.sha256(raw).hexdigest(),
+                     json.dumps({"bytes": len(html), "gzip": True})))
+
+
 def save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, params_version, key_to_pid) -> str:
     run_id = uuid.uuid4()
     for mode, lus in lineups.items():
@@ -217,6 +233,18 @@ def pool_from_db(cur, slate_id) -> tuple[list[dict], dict]:
 
 
 # ---------------------------------------------------------------- actions
+def _lineup_warning(rep):
+    if rep is None:
+        return "not fetched"
+    down = [k for k, ok in rep["sources"].items() if not ok]
+    if len(down) == 2:
+        return "both lineup sources failed - consensus starter box is empty; check cheap plays by hand"
+    msg = f'{rep["consensus_starters"]} consensus starters'
+    if down:
+        msg += f" (only one source: {', '.join(down)} unavailable - starters are single-source today)"
+    return msg
+
+
 def _summary(prep):
     m = prep["merge"]
     return {"date": str(prep["dk"]["date"]), "games": [g["game"] for g in prep["dk"]["games"]],
@@ -224,24 +252,26 @@ def _summary(prep):
             "warnings": {"unmatched_dk": m["unmatched_dk"], "unmatched_rg": m["unmatched_rg"][:40],
                          "salary_mismatch": m["salary_mismatch"],
                          "own_estimated": sum(1 for p in prep["players"] if p.get("own_estimated")),
-                         "starters_source": "not connected yet - consensus starter box is empty; "
-                                            "check starting lineups by hand for every sub-$5,500 play"}}
+                         "starters_source": _lineup_warning(prep.get("lineups"))},
+            "lineups": prep.get("lineups")}
 
 
 def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(),
-              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None) -> dict:
+              dk_raw=None, rg_raw=None, dk_name=None, rg_name=None, fetch=None) -> dict:
     overrides = clean_overrides(overrides)
+    lineup_src = (fetch or lineup_sources.fetch_all)()
     with db.connect() as conn:
         db.migrate(conn)
         db.seed_params(conn)
         version, params = db.current_params(conn)
-        prep = prepare(dk_text, rg_text, params)
+        prep = prepare(dk_text, rg_text, params, lineup_src)
         lineups, costs, used = build_all(prep["players"], params, n_gpp, n_cash, overrides, locks, excludes)
         with conn.cursor() as cur:
             slate_id = save_slate(cur, prep["dk"])
             key_to_pid = save_pool(cur, slate_id, prep["players"], "build", version)
             save_uploads(cur, slate_id, {"dk_salaries_csv": (dk_name, dk_raw or dk_text.encode()),
                                          "rg_projections_csv": (rg_name, rg_raw or rg_text.encode())})
+            save_pages(cur, slate_id, lineup_src)
             run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, **_summary(prep),
@@ -264,31 +294,38 @@ def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes
             "counts": {m: len(v) for m, v in lineups.items()}}
 
 
-def run_refresh(rg_text, rg_raw=None, rg_name=None, dk_text=None, dk_raw=None, dk_name=None,
-                slate_id=None) -> dict:
-    """Late news: update the pool from a fresh RotoGrinders export (DK file optional — the slate's
-    stored DKSalaries.csv is reused). Saved lineups are left alone; run check() afterwards."""
+def _stored_upload(cur, source, slate_id):
+    cur.execute("""SELECT raw FROM source_snapshots WHERE source=%s AND raw IS NOT NULL
+                     AND (%s::bigint IS NULL OR slate_id = %s)
+                   ORDER BY fetched_at DESC LIMIT 1""", (source, slate_id, slate_id))
+    r = cur.fetchone()
+    return bytes(r["raw"]).decode("utf-8-sig", errors="replace") if r else None
+
+
+def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=None, dk_name=None,
+                slate_id=None, fetch=None, now=None) -> dict:
+    """Late news. Re-reads both lineup pages for starters and injury tags; a fresh RotoGrinders export
+    and/or DKSalaries.csv are optional (the slate's stored files are reused). The pool is updated in
+    place, saved lineups are left alone, then the late-scratch check runs."""
     new_dk_raw = (dk_raw or dk_text.encode()) if dk_text else None
+    new_rg_raw = (rg_raw or rg_text.encode()) if rg_text else None
+    lineup_src = (fetch or lineup_sources.fetch_all)()
     with db.connect() as conn:
         db.migrate(conn)
         version, params = db.current_params(conn)
         with conn.cursor() as cur:
-            if not dk_text:
-                cur.execute("""SELECT raw FROM source_snapshots WHERE source='dk_salaries_csv' AND raw IS NOT NULL
-                                 AND (%s::bigint IS NULL OR slate_id = %s)
-                               ORDER BY fetched_at DESC LIMIT 1""", (slate_id, slate_id))
-                r = cur.fetchone()
-                if not r:
-                    raise UploadError("no stored DKSalaries.csv yet; upload it with the refresh")
-                dk_raw = bytes(r["raw"])
-                dk_text = dk_raw.decode("utf-8-sig", errors="replace")
-            prep = prepare(dk_text, rg_text, params)
+            dk_text = dk_text or _stored_upload(cur, "dk_salaries_csv", slate_id)
+            rg_text = rg_text or _stored_upload(cur, "rg_projections_csv", slate_id)
+            if not dk_text or not rg_text:
+                raise UploadError("this slate has no stored uploads yet; build it first")
+            prep = prepare(dk_text, rg_text, params, lineup_src)
             slate_id = save_slate(cur, prep["dk"])
             save_pool(cur, slate_id, prep["players"], "refresh", version)
-            save_uploads(cur, slate_id, {"rg_projections_csv": (rg_name, rg_raw or rg_text.encode()),
+            save_uploads(cur, slate_id, {"rg_projections_csv": (rg_name, new_rg_raw),
                                          "dk_salaries_csv": (dk_name, new_dk_raw)})
+            save_pages(cur, slate_id, lineup_src)
         conn.commit()
-        result = check(conn, slate_id)
+        result = check(conn, slate_id, now=now)
     return {"slate_id": slate_id, **_summary(prep), "check": result}
 
 

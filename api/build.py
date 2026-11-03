@@ -1,7 +1,8 @@
 """POST /api/build
   {action: "build",   dk_b64|dk_csv, rg_b64|rg_csv, dk_name?, rg_name?, n_gpp?, n_cash?, overrides?, locks?, excludes?}
   {action: "rebuild", slate_id, n_gpp?, n_cash?, overrides?, locks?, excludes?}
-  {action: "refresh", rg_b64|rg_csv, dk_b64?|dk_csv?, slate_id?}   -> pool updated + late-scratch check
+  {action: "refresh", slate_id?, rg_b64?, dk_b64?}  -> fresh lineup pages (+ optional new files), pool updated,
+                                                        late-scratch check
 overrides = {"GPP": {max_from_team, max_per_game, max_own_sum, min_salary, min_uniques, ceil_weight, own_penalty},
              "CASH": {...}}; locks/excludes are DK draftable IDs."""
 import sys
@@ -37,11 +38,9 @@ def _post(h):
         out = pipeline.run_rebuild(int(b["slate_id"]), n_gpp, n_cash, **common)
     elif action == "refresh":
         rg, rg_raw = pipeline.decode_upload(b.get("rg_b64"), b.get("rg_csv"))
-        if not rg:
-            raise UploadError("Upload a fresh RotoGrinders export to re-check inactives")
         dk, dk_raw = pipeline.decode_upload(b.get("dk_b64"), b.get("dk_csv"))
-        out = pipeline.run_refresh(rg, rg_raw, b.get("rg_name"), dk or None, dk_raw or None, b.get("dk_name"),
-                                   slate_id=int(b["slate_id"]) if b.get("slate_id") else None)
+        out = pipeline.run_refresh(rg or None, rg_raw or None, b.get("rg_name"), dk or None, dk_raw or None,
+                                   b.get("dk_name"), slate_id=int(b["slate_id"]) if b.get("slate_id") else None)
     else:
         raise UploadError(f"unknown action {action}")
     send(h, 200, {"ok": True, **out})

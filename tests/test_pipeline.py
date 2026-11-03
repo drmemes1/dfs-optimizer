@@ -46,8 +46,9 @@ def test_build_twice_upserts(monkeypatch):
     from dfs import db
     from dfs.pipeline import run_build
     dk, rg = synthetic_files(seed=2)
-    a = run_build(dk, rg, n_gpp=3, n_cash=1)
-    b = run_build(dk, rg, n_gpp=3, n_cash=1)
+    off = lambda: {"rotowire": None, "rg": None, "errors": {}, "raw": {}}  # noqa: E731
+    a = run_build(dk, rg, n_gpp=3, n_cash=1, fetch=off)
+    b = run_build(dk, rg, n_gpp=3, n_cash=1, fetch=off)
     assert a["slate_id"] == b["slate_id"] and a["run_id"] != b["run_id"]
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) AS n FROM pool WHERE slate_id=%s", (a["slate_id"],))
