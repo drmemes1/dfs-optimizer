@@ -78,7 +78,7 @@ def parse_rotowire(html: str) -> list[dict]:
                 bucket.append({"name": name, "name_norm": name_norm(name), "pos": pos.get_text(strip=True) if pos else None,
                                "pct_play": pct, "inj": norm_tag(inj.get_text(strip=True) if inj else "")})
             teams[abbr] = {"status": status, "starters": starters, "may_not_play": may_not}
-        ml = total = None
+        ml = total = spread = None
         for item in box.select(".lineup__odds-item"):
             label = (item.find("b").get_text(" ", strip=True) if item.find("b") else "").upper()
             span = item.select_one("span.composite") or item.find("span")
@@ -87,9 +87,14 @@ def parse_rotowire(html: str) -> list[dict]:
                 m = re.match(r"([A-Z]{2,4})\s+([-+]\d+)", text)
                 if m:
                     ml = {"team": team_code(m.group(1)), "ml": int(m.group(2))}
+            elif label == "SPREAD":
+                m = re.match(r"([A-Z]{2,4})\s+([-+]?\d+(?:\.\d+)?)", text)
+                if m:
+                    spread = {"team": team_code(m.group(1)), "spread": float(m.group(2))}
             elif "O/U" in label:
                 total = _num(text)
-        games.append({"away": abbrs[0], "home": abbrs[1], "teams": teams, "fav_ml": ml, "total": total})
+        games.append({"away": abbrs[0], "home": abbrs[1], "teams": teams, "fav_ml": ml, "total": total,
+                      "spread": spread})
     return games
 
 

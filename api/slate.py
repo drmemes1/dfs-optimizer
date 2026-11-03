@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dfs import db, pipeline, queries  # noqa: E402
+from dfs import db, jobs, pipeline, queries  # noqa: E402
 from dfs.web import guarded, query, send  # noqa: E402
 
 
@@ -36,9 +36,10 @@ def _get(h):
                 return send(h, 400, {"ok": False, "error": "check needs id"})
             return send(h, 200, {"ok": True, **pipeline.check(conn, sid)})
         detail = queries.slate_detail(conn, sid)
+        runs = jobs.recent_runs(conn, 3)
     if not detail:
         return send(h, 404, {"ok": False, "error": "no slate yet"})
-    send(h, 200, {"ok": True, **detail})
+    send(h, 200, {"ok": True, **detail, "job_runs": runs})
 
 
 class handler(BaseHTTPRequestHandler):

@@ -1,0 +1,31 @@
+# Records starting lineups, injury tags and Vegas lines through the afternoon and evening, and
+# re-runs the late-scratch check for today's slate. Vercel Hobby cron only runs once a day, so this
+# free GitHub schedule drives it. Needs three repository secrets (Settings -> Secrets -> Actions):
+#   APP_URL               e.g. https://dfs-optimizer-git-rebuild-drmemes-projects.vercel.app
+#   CRON_SECRET           same value as the CRON_SECRET env var in Vercel
+#   VERCEL_BYPASS_SECRET  Vercel -> Project -> Settings -> Deployment Protection -> Protection Bypass for Automation
+name: lineup-snapshots
+on:
+  schedule:
+    - cron: "*/20 18-23 * * *"   # 1pm-7pm ET (EST)  — GitHub may delay scheduled runs by several minutes
+    - cron: "*/20 0-4 * * *"     # 7pm-midnight ET (EST)
+  workflow_dispatch: {}
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call snapshot job
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BYPASS: ${{ secrets.VERCEL_BYPASS_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ] || [ -z "$BYPASS" ]; then
+            echo "::error::APP_URL, CRON_SECRET and VERCEL_BYPASS_SECRET repository secrets must all be set"; exit 1
+          fi
+          code=$(curl -sS -o out.json -w '%{http_code}' --max-time 290 \
+            -H "Authorization: Bearer $CRON_SECRET" -H "x-vercel-protection-bypass: $BYPASS" \
+            "$APP_URL/api/cron?job=snapshot")
+          cat out.json; echo
+          if [ "$code" != "200" ]; then echo "::error::snapshot job returned HTTP $code"; exit 1; fi

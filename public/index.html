@@ -114,12 +114,13 @@
       </div>
     </div>
     <div class="games" id="games"></div>
+    <div id="jobStatus" class="small muted" style="margin:-4px 0 10px"></div>
     <div id="recheck" hidden class="msg" style="margin-bottom:10px">
       <div class="row">
-        <label>Fresh RotoGrinders export <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
-        <label>DKSalaries.csv (optional) <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
-        <button class="primary" type="button" id="refreshBtn">Update statuses &amp; check</button>
-        <button type="button" id="checkOnlyBtn">Check without new file</button>
+        <button class="primary" type="button" id="refreshBtn">Pull latest lineups &amp; injuries, then check</button>
+        <label>New RotoGrinders file (optional) <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
+        <label>New DKSalaries.csv (optional) <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
+        <button type="button" id="checkOnlyBtn">Check saved statuses only</button>
       </div>
       <div id="checkMsg" style="margin-top:8px"></div>
     </div>
@@ -219,6 +220,10 @@ async function loadSlate(id) {
     const lu = Object.values(current.lineups)[0]?.[0];
     locks = new Set((lu?.locks || []).map(Number)); excludes = new Set((lu?.excludes || []).map(Number));
     checkResult = null; render();
+    try {   // show late-scratch flags without a click (the scheduler refreshes statuses through the evening)
+      const c = await api(`/api/slate?id=${current.slate.id}&check=1`);
+      if (c.flags.length) { $("recheck").hidden = false; showCheck(c); }
+    } catch (e) { /* non-fatal */ }
   } catch (e) { ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = true); }
 }
 
@@ -268,6 +273,15 @@ function render() {
   ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = false);
   $("slateTitle").innerHTML = `${esc(s.date)} · ${s.n_games} games <span class="muted small" style="font-weight:400">built ${current.run ? new Date(current.run.built_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"} · params v${current.run?.params_version ?? "–"}</span>`;
   renderGames();
+  const snap = (current.job_runs || []).find(r => r.job === "snapshot");
+  if (!snap) $("jobStatus").innerHTML = '<span class="warn">Automatic lineup checks haven\'t run yet (scheduler not set up).</span>';
+  else {
+    const ago = Math.round((Date.now() - new Date(snap.started_at)) / 60000);
+    const errs = Object.entries(snap.errors || {}).map(([k, v]) => k + ": " + v).join("; ");
+    $("jobStatus").innerHTML = `Last automatic lineup check ${ago < 90 ? ago + " min" : Math.round(ago / 60) + " h"} ago ` +
+      (snap.ok ? '<span class="good">✓</span>' : `<span class="bad">✗ ${esc(errs)}</span>`) +
+      (ago > 45 && (current.slate.game_list || []).some(g => new Date(g.start) > Date.now()) ? ' <span class="warn">— overdue; check the scheduler</span>' : "");
+  }
   const modes = MODES.filter(([m]) => current.lineups[m]);
   if (!modes.some(([m]) => m === mode)) mode = modes[0]?.[0] || "GPP";
   $("modeTabs").innerHTML = modes.map(([m, label]) =>
@@ -352,10 +366,10 @@ $("checkOnlyBtn").onclick = async () => {
 };
 $("refreshBtn").onclick = async () => {
   const rg = $("rgFresh").files[0], dk = $("dkFresh").files[0];
-  if (!rg) { $("checkMsg").textContent = "Choose a fresh RotoGrinders export first."; return; }
-  $("refreshBtn").disabled = true; $("checkMsg").textContent = "Updating statuses…";
+  $("refreshBtn").disabled = true; $("checkMsg").textContent = "Pulling the latest lineups and injury tags…";
   try {
-    const j = await post("/api/build", { action: "refresh", slate_id: current.slate.id, rg_b64: await fileB64(rg), rg_name: rg.name,
+    const j = await post("/api/build", { action: "refresh", slate_id: current.slate.id,
+      ...(rg ? { rg_b64: await fileB64(rg), rg_name: rg.name } : {}),
       ...(dk ? { dk_b64: await fileB64(dk), dk_name: dk.name } : {}) });
     await loadSlate(j.slate_id); showCheck(j.check);
   } catch (e) { $("checkMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
