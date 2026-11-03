@@ -17,7 +17,8 @@ def latest_run(cur, slate_id):
 
 
 LINEUP_COLS = """id, mode, rank, salary, proj, ceil, own_sum, players, actual_score, entered, edited,
-                 settings, locks, excludes, cost_vs_unconstrained, built_at, params_version"""
+                 settings, locks, excludes, cost_vs_unconstrained, built_at, params_version,
+                 contest_context, contest_result"""
 
 
 def slate_detail(conn, slate_id=None):
