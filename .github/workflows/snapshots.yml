@@ -1,7 +1,7 @@
 # Records starting lineups, injury tags and Vegas lines through the afternoon and evening, and
 # re-runs the late-scratch check for today's slate. Vercel Hobby cron only runs once a day, so this
 # free GitHub schedule drives it. Needs three repository secrets (Settings -> Secrets -> Actions):
-#   APP_URL               e.g. https://dfs-optimizer-git-rebuild-drmemes-projects.vercel.app
+#   APP_URL               https://dfs-optimizer-drmemes-projects.vercel.app  (production, after rebuild is merged)
 #   CRON_SECRET           same value as the CRON_SECRET env var in Vercel
 #   VERCEL_BYPASS_SECRET  Vercel -> Project -> Settings -> Deployment Protection -> Protection Bypass for Automation
 name: lineup-snapshots
