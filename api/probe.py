@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from dfs.http import HEADERS  # noqa: E402
+from dfs.http import UA  # noqa: E402
+HEADERS = {"User-Agent": UA, "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
 from dfs.web import query, send  # noqa: E402
 
 URLS = [
