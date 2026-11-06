@@ -1,167 +1,343 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>NBA DFS Optimizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Night arena: maple floor in shadow, scoreboard glow, one amber that only ever means
+     "act now". Interactive things are slate blue so amber is never spent on decoration. */
   :root {
-    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
-    --accent: #2c5fd4; --accent-ink: #ffffff; --warn: #a15c00; --warn-bg: #fbf0dc; --bad: #b3261e; --bad-bg: #fbe6e4;
-    --good: #1f7a3d;
-    --gA: #1f7a3d; --gA-bg: #e3f3e8; --gB: #2c5fd4; --gB-bg: #e6edfb;
-    --gC: #9a6400; --gC-bg: #fbf0dc; --gD: #6b6b66; --gD-bg: #efeeea;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #151514; --panel: #1e1e1c; --ink: #ecebe6; --muted: #a3a29b; --line: #34332f;
-      --accent: #7aa2ff; --accent-ink: #0f1a33; --warn: #e3a54a; --warn-bg: #3a2c12; --bad: #ff8a80; --bad-bg: #3d1d1a;
-      --good: #6fd38f;
-      --gA: #6fd38f; --gA-bg: #183323; --gB: #8fb0ff; --gB-bg: #1c2742;
-      --gC: #e9b25c; --gC-bg: #3a2c12; --gD: #a3a29b; --gD-bg: #2a2a27;
-    }
+    --floor: #14110c; --panel: #1b1710; --sunk: #0f0d09;
+    --rule: #332b20; --rule-soft: #262016;
+    --chalk: #f4efe3; --dim: #988b74; --faint: #6b6253;
+    --clock: #ffb224; --clock-bg: #2e2109;
+    --cool: #6e9cc4; --cool-ink: #0f1620;
+    --ok: #74b88a; --bad: #e8705f; --bad-bg: #2d1713;
+    --gA: #74b88a; --gA-bg: #16271c; --gB: #6e9cc4; --gB-bg: #141f29;
+    --gC: #c9a24a; --gC-bg: #2a2212; --gD: #6b6253; --gD-bg: #1f1b14;
+    --narrow: "Archivo Narrow", "Helvetica Neue", Arial, sans-serif;
+    --sans: Archivo, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
-           padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 17px; margin: 0; }
-  main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
-  main, section { min-width: 0; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  h2 { font-size: 15px; margin: 0 0 10px; }
-  .muted { color: var(--muted); }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--floor); color: var(--chalk);
+    font: 400 14px/1.45 var(--sans);
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+  }
+  .n, td.n, .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dim, .muted { color: var(--dim); }
+  .faint { color: var(--faint); }
   .small { font-size: 12px; }
-  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
-  label { min-width: 0; max-width: 100%; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-  input[type=number] { width: 80px; }
-  input[type=file] { max-width: 100%; }
-  input, select, button { font: inherit; color: var(--ink); background: var(--bg);
-                          border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .warn { color: var(--clock); } .bad { color: var(--bad); } .good { color: var(--ok); }
+  a { color: var(--cool); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--clock); outline-offset: 2px; }
+
+  /* ── status bar: slate identity on the left, the countdown as the one big thing ───── */
+  #bar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 18px; background: var(--sunk);
+    border-bottom: 1px solid var(--rule);
+  }
+  .mark {
+    font: 700 13px/1 var(--narrow); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--chalk); padding-right: 16px; border-right: 1px solid var(--rule);
+  }
+  #barSlate { font: 600 13px/1 var(--narrow); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .pick { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dim); }
+  .pick select { min-width: 150px; }
+  .clockwrap { display: flex; align-items: baseline; gap: 9px; }
+  .clocklabel { font: 600 11px/1 var(--narrow); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+  .clock {
+    font: 700 30px/1 var(--narrow); letter-spacing: .02em; color: var(--chalk);
+    font-variant-numeric: tabular-nums;
+  }
+  .clock.soon { color: var(--clock); }
+  .clock.gone { color: var(--faint); font-size: 20px; letter-spacing: .1em; text-transform: uppercase; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 18px 18px 64px; display: grid; gap: 18px; }
+
+  /* ── panels: hairlines, no shadows, no radius theatre ─────────────────────────────── */
+  section, details.panel {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 3px; padding: 16px 18px;
+  }
+  h2 { margin: 0 0 12px; font: 600 15px/1.2 var(--sans); letter-spacing: 0; }
+  h2 .sub { font: 400 12px/1 var(--sans); color: var(--dim); margin-left: 10px; }
+  details.panel > summary {
+    cursor: pointer; list-style: none; font: 600 13px/1 var(--sans); color: var(--dim);
+    display: flex; align-items: center; gap: 9px; padding: 0; margin: 0;
+  }
+  details.panel[open] > summary { margin-bottom: 14px; color: var(--chalk); }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary::before {
+    content: ""; width: 0; height: 0; flex: none;
+    border-left: 5px solid var(--faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    transform-origin: 25% 50%; transition: transform .12s ease;
+  }
+  details.panel[open] > summary::before { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { details.panel > summary::before { transition: none; } }
+
+  /* ── the alert band: the only amber on the page ───────────────────────────────────── */
+  #recheck { border: 1px solid var(--clock); border-left-width: 4px; background: var(--clock-bg); border-radius: 3px; padding: 13px 16px; }
+  #checkMsg { font: 600 15px/1.3 var(--sans); }
+  #recheck .tools { margin-top: 12px; }
+  #recheck .tools > summary { color: var(--clock); }
+  #recheck .tools[open] > summary { margin-bottom: 10px; }
+
+  /* ── controls ─────────────────────────────────────────────────────────────────────── */
+  label { min-width: 0; max-width: 100%; display: grid; gap: 5px; font-size: 12px; color: var(--dim); }
+  input, select, button, textarea {
+    font: inherit; color: var(--chalk); background: var(--sunk);
+    border: 1px solid var(--rule); border-radius: 3px; padding: 7px 9px;
+  }
+  input[type=file] { padding: 5px 7px; font-size: 12px; }
+  input[type=file]::file-selector-button {
+    font: 600 12px var(--sans); color: var(--chalk); background: var(--panel);
+    border: 1px solid var(--rule); border-radius: 2px; padding: 5px 10px; margin-right: 10px; cursor: pointer;
+  }
+  input[type=checkbox] { accent-color: var(--cool); }
   button { cursor: pointer; }
-  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-  button.sm { padding: 2px 7px; font-size: 12px; }
-  button:disabled { opacity: .5; cursor: progress; }
-  button[aria-pressed=true].lock { background: var(--gA-bg); color: var(--good); border-color: var(--good); }
-  button[aria-pressed=true].excl { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
-  details > summary { cursor: pointer; color: var(--accent); margin: 10px 0 6px; }
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .tabs button[aria-pressed=true] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
-  .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; }
-  td.n, th.n { text-align: right; }
-  .lineups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
-  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
-  .card.entered { border-color: var(--good); box-shadow: inset 3px 0 0 var(--good); }
-  .card .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .card td { padding: 3px 6px; }
-  .card tr.flag td { background: var(--bad-bg); }
-  .card tr.locked td:first-child::after { content: " 🔒"; }
-  .card td.subs { font-size: 12px; padding: 4px 6px 8px; background: var(--bad-bg); white-space: normal; }
-  .subs button { margin: 2px 4px 2px 0; }
-  .grade { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; border-radius: 4px; padding: 0 5px; }
-  .gA { color: var(--gA); background: var(--gA-bg); } .gB { color: var(--gB); background: var(--gB-bg); }
-  .gC { color: var(--gC); background: var(--gC-bg); } .gD { color: var(--gD); background: var(--gD-bg); }
-  .warn { color: var(--warn); } .bad { color: var(--bad); } .good { color: var(--good); }
-  .msg { padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
-  .msg.alert { background: var(--warn-bg); border-color: var(--warn); }
-  .games { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-  .game { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
-  .game.soon { border-color: var(--warn); color: var(--warn); }
-  .game.locked { color: var(--muted); text-decoration: line-through; }
-  .cons-grid { display: grid; grid-template-columns: auto repeat(2, 90px); gap: 4px 10px; align-items: center; font-size: 12px; }
+  button:hover:not(:disabled) { border-color: var(--faint); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--cool); color: var(--cool-ink); border-color: var(--cool); font-weight: 600; }
+  button.sm { padding: 3px 8px; font-size: 12px; }
+  button[aria-pressed=true] { background: var(--cool); color: var(--cool-ink); border-color: var(--cool); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
   .two { display: grid; gap: 16px; grid-template-columns: 1fr; }
   @media (min-width: 900px) { .two { grid-template-columns: 3fr 2fr; } }
-  @media (max-width: 480px) { .card td.team { display: none; } }
+
+  /* ── mode tabs ────────────────────────────────────────────────────────────────────── */
+  .tabs { display: flex; gap: 0; flex-wrap: wrap; margin: 14px 0 12px; border-bottom: 1px solid var(--rule); }
+  .tabs button {
+    background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+    padding: 8px 14px; color: var(--dim); font: 600 13px var(--sans);
+  }
+  .tabs button[aria-pressed=true] { color: var(--chalk); border-bottom-color: var(--clock); background: none; }
+
+  /* ── lineup cards: the slot column is a spine, numbers are a right-aligned rail ────── */
+  .lineups { display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { .lineups { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); } }
+  .card { border: 1px solid var(--rule); border-radius: 3px; background: var(--sunk); overflow: hidden; }
+  .card.entered { border-color: var(--cool); }
+  .card .meta {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 12px; border-bottom: 1px solid var(--rule-soft);
+    font: 500 12px var(--sans); color: var(--dim);
+  }
+  .card .meta .rank { font: 700 15px/1 var(--narrow); letter-spacing: .06em; color: var(--chalk); text-transform: uppercase; }
+  .card .meta .proj { margin-left: auto; font: 700 19px/1 var(--narrow); color: var(--chalk); }
+  .card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .card td { padding: 5px 6px; border-bottom: 1px solid var(--rule-soft); }
+  .card tr:last-child td { border-bottom: 0; }
+  .card td:first-child {
+    width: 40px; padding-left: 12px; font: 600 11px var(--narrow); letter-spacing: .08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .card td:nth-child(2) { overflow-wrap: anywhere; }
+  .card td:last-child { padding-right: 12px; }
+  .card tr.flag td { background: var(--bad-bg); }
+  .card tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+  .card tr.locked td { color: var(--faint); }
+  .card td.subs {
+    /* this cell is the only one in its row, so it also matches td:first-child above —
+       every inherited label style has to be undone explicitly */
+    width: auto; font: 400 12px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
+    padding: 8px 12px 10px 52px; background: var(--bad-bg);
+    white-space: normal; color: var(--dim); border-bottom: 1px solid var(--rule-soft);
+  }
+  /* buttons that cannot wrap set the min-content width of their colspan cell, which squeezes
+     the name column in every other row of the card */
+  .card td.subs button { margin: 4px 6px 0 0; max-width: 100%; white-space: normal; text-align: left; }
+  /* A colspan cell's minimum width is distributed across the columns it spans, so a wide swap
+     row squeezes the name column in every other row. width:0 + min-width:100% lets the content
+     fill the cell while contributing nothing to the table's width calculation. */
+  .card td.subs .subwrap { width: 0; min-width: 100%; }
+  .card .foot {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 9px 12px; border-top: 1px solid var(--rule);
+    font: 600 11px var(--narrow); letter-spacing: .09em; text-transform: uppercase; color: var(--faint);
+  }
+  .card .foot b { color: var(--chalk); font-weight: 700; }
+  .card .foot label { margin-left: auto; display: flex; gap: 6px; align-items: center;
+                      font: 600 11px var(--narrow); letter-spacing: .09em; text-transform: uppercase; color: var(--dim); }
+
+  /* ── games strip ──────────────────────────────────────────────────────────────────── */
+  .games { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .game {
+    border: 1px solid var(--rule); border-radius: 2px; padding: 4px 8px;
+    font: 500 11px var(--narrow); letter-spacing: .07em; text-transform: uppercase; color: var(--dim);
+    display: flex; gap: 7px; align-items: baseline;
+  }
+  .game .t { color: var(--faint); }
+  .game.soon { border-color: var(--faint); color: var(--chalk); }
+  .game.soon .t { color: var(--dim); }
+  .game.locked { color: var(--faint); border-style: dashed; }
+
+  /* ── data tables ──────────────────────────────────────────────────────────────────── */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th {
+    text-align: left; font: 600 10px var(--narrow); letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); padding: 6px; border-bottom: 1px solid var(--rule); position: sticky; top: 0;
+    background: var(--panel);
+  }
+  th.n { text-align: right; }
+  td { padding: 5px 6px; border-bottom: 1px solid var(--rule-soft); }
+  .scroll { overflow-x: auto; }
+  .grade {
+    display: inline-block; min-width: 20px; text-align: center; border-radius: 2px; padding: 1px 5px;
+    font: 700 11px var(--narrow);
+  }
+  .gA { color: var(--gA); background: var(--gA-bg); } .gB { color: var(--gB); background: var(--gB-bg); }
+  .gC { color: var(--gC); background: var(--gC-bg); } .gD { color: var(--gD); background: var(--gD-bg); }
+  .msg { padding: 10px 12px; border-radius: 3px; background: var(--sunk); border: 1px solid var(--rule); }
+  .msg.alert { background: var(--clock-bg); border-color: var(--clock); }
+  .msg.bad { background: var(--bad-bg); border-color: var(--bad); color: var(--chalk); }
+  .cons-grid { display: grid; grid-template-columns: auto repeat(2, 92px); gap: 5px 12px; align-items: center; font-size: 12px; }
+  textarea { width: 100%; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  @media (max-width: 560px) {
+    main { padding: 14px 12px 48px; gap: 14px; }
+    section, details.panel { padding: 13px 13px; }
+    #bar { gap: 12px; padding: 9px 13px; }
+    .pick { order: 3; margin-left: 0; width: 100%; }
+    .clock { font-size: 26px; }
+    .card td.team { display: none; }
+    .card td.subs { padding-left: 14px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>NBA DFS Optimizer <span class="muted" style="font-weight:400">· DraftKings Classic</span></h1>
-  <label>Slate <select id="slatePick"><option value="">Latest</option></select></label>
+<header id="bar">
+  <span class="mark">NBA DFS</span>
+  <span id="barSlate">no slate yet</span>
+  <div class="clockwrap"><span class="clocklabel">Lock</span><span class="clock gone" id="lockClock">no slate</span></div>
+  <label class="pick">Slate <select id="slatePick"><option value="">Latest</option></select></label>
 </header>
 <main>
-  <section>
-    <h2>Build lineups</h2>
-    <p class="muted" style="margin:0 0 10px">Upload DraftKings' <b>DKSalaries.csv</b> (contest page → Export to CSV). RotoGrinders
-      projections are read automatically when your RotoGrinders login is connected; otherwise add them with the
-      <a href="/rg.html">grabber button</a>. Re-uploading later in the day updates the same slate.</p>
-    <form id="buildForm" class="row">
-      <label>DKSalaries.csv <input type="file" id="dkFile" accept=".csv,text/csv" required></label>
-      <label>RotoGrinders projections <input type="file" id="rgFile" accept=".tsv,.csv,.txt,text/csv,text/tab-separated-values"></label>
-      <label>GPP lineups <input type="number" id="nGpp" value="10" min="1" max="40"></label>
-      <label>Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
-      <button class="primary" id="buildBtn" type="submit">Build</button>
-    </form>
-    <details id="rgPasteBox"><summary>RotoGrinders: paste instead of a file · <a href="/rg.html">get the grabber button</a></summary>
-      <textarea id="rgPaste" rows="3" style="width:100%;font:12px ui-monospace,monospace" placeholder="Paste what the Grab RG projections button copied"></textarea>
-    </details>
-    <div class="row" style="margin-top:10px">
-      <label style="flex:1;min-width:220px">Lock (always use) — names, comma-separated
-        <input id="lockNames" placeholder="Jalen Brunson, Lu Dort"></label>
-      <label style="flex:1;min-width:220px">Exclude (never use)
-        <input id="exclNames" placeholder="Player I don't like, Another Guy"></label>
-      <label style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="rememberNames">
-        Save as my standing lists</label>
-    </div>
-    <p class="muted small" style="margin:4px 0 0">First and last name is enough (accents, Jr. and nicknames are handled). Add a team if two
-      players share a name: <i>Jalen Williams (OKC)</i>. Saved lists apply to every slate until you change them; clear a box and
-      tick "save" to empty it. Used by Build and Rebuild.</p>
-    <details id="contestDetails">
-      <summary>Contest these lineups are for</summary>
+
+  <div id="recheck" hidden>
+    <div id="checkMsg"></div>
+    <details class="tools"><summary>Re-check now</summary>
       <div class="row">
-        <label>Contest name <input id="cName" placeholder="NBA $20K Shot"></label>
-        <label>Entry fee $ <input type="number" id="cFee" min="0" step="any"></label>
-        <label>Field size <input type="number" id="cField" min="1"></label>
-        <label>Payouts <select id="cTop"><option value="">–</option><option value="top_heavy">Top-heavy GPP</option>
-          <option value="flat">Flatter GPP</option><option value="double_up">Double-up</option><option value="fifty_fifty">50/50</option></select></label>
-        <label>Entry type <select id="cMode"><option value="">–</option><option value="SE">Single entry</option><option value="ME">Multi-entry</option></select></label>
-        <label>Max entries <input type="number" id="cMax" min="1"></label>
+        <button class="primary" type="button" id="refreshBtn">Pull latest lineups and injuries</button>
+        <button type="button" id="checkOnlyBtn">Check saved statuses only</button>
+        <label>New RotoGrinders file <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
+        <label>New DKSalaries.csv <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
       </div>
     </details>
-    <details id="consDetails">
-      <summary>Constraints (defaults from params v<span id="pv">–</span>)</summary>
-      <div class="cons-grid" id="consGrid"></div>
-      <p class="muted small" style="margin:6px 0 0">Changes apply to the next Build or Rebuild only; the stored params are not edited.
-        Ownership knobs are measured values; change them only with a graded result behind it.</p>
-    </details>
-    <div id="buildMsg" style="margin-top:10px"></div>
-  </section>
+  </div>
 
   <section id="slateSec" hidden>
-    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:12px">
       <h2 id="slateTitle" style="margin:0"></h2>
-      <div class="row">
+      <div class="row" style="gap:8px">
         <button type="button" id="checkBtn">Re-check inactives</button>
         <a id="exMode"><button type="button" id="exModeBtn">DK upload CSV</button></a>
-        <a id="exEntered"><button type="button">DK CSV · entered only</button></a>
+        <a id="exEntered"><button type="button">Entered only</button></a>
       </div>
     </div>
     <div class="games" id="games"></div>
-    <div id="jobStatus" class="small muted" style="margin:-4px 0 10px"></div>
-    <div id="recheck" hidden class="msg" style="margin-bottom:10px">
-      <div class="row">
-        <button class="primary" type="button" id="refreshBtn">Pull latest lineups &amp; injuries, then check</button>
-        <label>New RotoGrinders file (optional) <input type="file" id="rgFresh" accept=".csv,text/csv"></label>
-        <label>New DKSalaries.csv (optional) <input type="file" id="dkFresh" accept=".csv,text/csv"></label>
-        <button type="button" id="checkOnlyBtn">Check saved statuses only</button>
-      </div>
-      <div id="checkMsg" style="margin-top:8px"></div>
-    </div>
+    <div id="jobStatus" class="small dim" style="margin:-4px 0 12px"></div>
     <div id="costMsg"></div>
     <div class="tabs" id="modeTabs"></div>
     <div class="lineups" id="lineups"></div>
   </section>
 
-  <section>
-    <h2>Contest results <span class="muted" style="font-weight:400">· optional</span></h2>
-    <p class="muted small" style="margin:0 0 8px">You don't need this for grading: every saved lineup is graded automatically the next
-      morning from verified box scores. Uploading a contest's standings CSV (DraftKings contest page → download standings) adds what
-      box scores can't: actual ownership, the whole field's scores, and your exact finishes. That data trains the ownership and
-      field models later, so it's worth doing for your main contests when convenient.</p>
+  <details class="panel" id="buildPanel" open>
+    <summary>Build lineups</summary>
+    <p class="dim small" style="margin:0 0 12px;max-width:72ch">Upload DraftKings' <b>DKSalaries.csv</b> from the contest page.
+      Projections are read from RotoGrinders automatically. Re-uploading later updates the same slate.</p>
+    <form id="buildForm" class="row">
+      <label style="flex:1 1 280px">DKSalaries.csv <input type="file" id="dkFile" accept=".csv,text/csv" required></label>
+      <label style="width:96px">GPP lineups <input type="number" id="nGpp" value="10" min="1" max="40"></label>
+      <label style="width:96px">Cash lineups <input type="number" id="nCash" value="3" min="1" max="10"></label>
+      <button class="primary" id="buildBtn" type="submit">Build</button>
+    </form>
+    <div class="row" style="margin-top:14px">
+      <label style="flex:1;min-width:220px">Always use these players
+        <input id="lockNames" placeholder="Jalen Brunson, Lu Dort"></label>
+      <label style="flex:1;min-width:220px">Never use these players
+        <input id="exclNames" placeholder="Someone you are fading"></label>
+      <label style="display:flex;gap:7px;align-items:center;color:var(--chalk)"><input type="checkbox" id="rememberNames">
+        Keep these for every slate</label>
+    </div>
+    <p class="dim small" style="margin:6px 0 0;max-width:72ch">First and last name is enough; accents, Jr. and nicknames are handled.
+      Add a team when two players share a name, like <i>Jalen Williams (OKC)</i>.</p>
+
+    <details id="rgPasteBox" class="tools" style="margin-top:14px">
+      <summary class="small dim">RotoGrinders projections &mdash; only if the automatic login is broken</summary>
+      <p class="dim small" style="margin:8px 0">Normally you leave this empty. If a build says the sign-in failed, use the
+        <a href="/rg.html">grabber button</a> and drop the file here, or paste what it copied.</p>
+      <div class="row">
+        <label style="flex:1 1 260px">RotoGrinders file
+          <input type="file" id="rgFile" accept=".tsv,.csv,.txt,text/csv,text/tab-separated-values"></label>
+      </div>
+      <textarea id="rgPaste" rows="3" style="margin-top:10px" placeholder="Or paste what the grabber copied"></textarea>
+    </details>
+
+    <details id="contestDetails" class="tools" style="margin-top:10px">
+      <summary class="small dim">Contest these lineups are for</summary>
+      <div class="row" style="margin-top:10px">
+        <label>Contest name <input id="cName" placeholder="NBA $20K Shot"></label>
+        <label>Entry fee $ <input type="number" id="cFee" min="0" step="any"></label>
+        <label>Field size <input type="number" id="cField" min="1"></label>
+        <label>Payouts <select id="cTop"><option value="">&ndash;</option><option value="top_heavy">Top-heavy GPP</option>
+          <option value="flat">Flat / double-up</option></select></label>
+        <label>Entry type <select id="cMode"><option value="">&ndash;</option><option value="SE">Single entry</option><option value="ME">Multi-entry</option></select></label>
+        <label>Max entries <input type="number" id="cMax" min="1"></label>
+      </div>
+    </details>
+
+    <details id="consDetails" class="tools" style="margin-top:10px">
+      <summary class="small dim">Constraints, defaulted from params v<span id="pv">&ndash;</span></summary>
+      <div class="cons-grid" id="consGrid" style="margin-top:10px"></div>
+      <p class="dim small" style="margin:8px 0 0">Changes apply to this build only and are never written back to params.</p>
+    </details>
+
+    <div id="buildMsg" style="margin-top:12px"></div>
+  </details>
+
+  <section id="resultsSec" hidden>
+    <h2>Results <span class="sub" id="resultsWhen"></span></h2>
+    <div id="results"></div>
+  </section>
+
+  <details class="panel" id="poolSec" hidden>
+    <summary>Player pool</summary>
+    <div class="row" style="margin-bottom:10px">
+      <input type="search" id="poolSearch" placeholder="Find a player or team" style="flex:1;min-width:200px">
+      <span class="dim small" id="lockCount"></span>
+      <button type="button" id="clearLE">Clear</button>
+      <button class="primary" type="button" id="rebuildBtn">Rebuild</button>
+    </div>
+    <div class="scroll" style="max-height:420px;overflow-y:auto"><table id="poolTable"></table></div>
+  </details>
+
+  <details class="panel" id="lowerSec" hidden>
+    <summary>Value board and injury watch</summary>
+    <div class="two">
+      <div>
+        <h2>Value board <span class="sub">sub-$5,500, 12+ minutes</span></h2>
+        <div class="scroll"><table id="board"></table></div>
+      </div>
+      <div>
+        <h2>Injury watch</h2>
+        <div class="scroll"><table id="watch"></table></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary>Contest results</summary>
+    <p class="dim small" style="margin:0 0 12px;max-width:72ch">Grading happens automatically from box scores every morning. Importing a
+      contest's standings CSV adds what box scores cannot: real ownership, the whole field's scores, and your exact finish. That data
+      trains the ownership and field models later.</p>
     <div class="row">
       <label>Standings CSV <input type="file" id="stFile" accept=".csv,text/csv"></label>
       <label>Your DK username <input id="stUser" placeholder="drmemes1"></label>
@@ -171,42 +347,9 @@
       <label>Places paid <input type="number" id="stPaid"></label>
       <button class="primary" type="button" id="stBtn">Import results</button>
     </div>
-    <div id="stMsg" style="margin-top:8px"></div>
-  </section>
+    <div id="stMsg" style="margin-top:10px"></div>
+  </details>
 
-  <section id="resultsSec" hidden>
-    <h2>Results <span class="muted" id="resultsWhen" style="font-weight:400"></span></h2>
-    <div id="results"></div>
-  </section>
-
-  <section id="poolSec" hidden>
-    <div class="row" style="justify-content:space-between;align-items:center">
-      <h2 style="margin:0">Player pool · lock / exclude</h2>
-      <div class="row">
-        <input type="search" id="poolSearch" placeholder="Find player or team">
-        <span class="muted small" id="lockCount"></span>
-        <button type="button" id="clearLE">Clear</button>
-        <button class="primary" type="button" id="rebuildBtn">Rebuild</button>
-      </div>
-    </div>
-    <p class="muted small" style="margin:6px 0 8px">Rebuild uses the stored pool with your locks, excludes and constraints, and shows what the
-      top lineup gives up in projection versus the unconstrained build.</p>
-    <div class="scroll" style="max-height:420px;overflow-y:auto"><table id="poolTable"></table></div>
-  </section>
-
-  <div class="two" id="lowerSec" hidden>
-    <section>
-      <h2>Value board <span class="muted" style="font-weight:400">· sub-$5,500, 12+ min</span></h2>
-      <p class="muted small" style="margin:0 0 8px">Boxes: consensus starter · 24+ projected minutes · value 5.0+.
-        A = all three, B = two, C = one, D = lottery ticket. <span class="warn">Starting lineups are not connected yet:
-        check every cheap play's role by hand.</span></p>
-      <div class="scroll"><table id="board"></table></div>
-    </section>
-    <section>
-      <h2>Injury / questionable watch</h2>
-      <div class="scroll"><table id="watch"></table></div>
-    </section>
-  </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -248,7 +391,7 @@ async function loadParams() {
     };
     const gppOnly = ["max_own_sum", "ceil_weight", "own_penalty"];
     $("consGrid").innerHTML = '<span></span><b>GPP</b><b>Cash</b>' + CONS.map(([k, label]) =>
-      `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="muted">n/a</span>' : cell("CASH", k)}`).join("");
+      `<span>${label}</span>${cell("GPP", k)}${gppOnly.includes(k) ? '<span class="dim">n/a</span>' : cell("CASH", k)}`).join("");
   } catch (e) { /* db not ready */ }
 }
 
@@ -263,8 +406,8 @@ function nameNotes(n) {
   if (n.cant_lock?.length) notes.push(`<span class="bad">Can't lock (ruled out):</span> ${esc(n.cant_lock.map(c => c.name + " " + c.status).join(", "))}`);
   if (n.conflicts?.length) notes.push(`<span class="warn">On both lists, excluded:</span> ${esc(n.conflicts.join(", "))}`);
   if (n.fuzzy?.length) notes.push(`<span class="warn">Matched by last name (check):</span> ${esc(n.fuzzy.map(f => f.name + " → " + f.matched).join(", "))}`);
-  if (n.not_on_slate?.length) notes.push(`<span class="muted">Saved-list players not on this slate: ${esc(n.not_on_slate.join(", "))}</span>`);
-  if (n.locks?.length || n.excludes?.length) notes.push(`<span class="muted">Applied ${n.locks.length} lock(s) and ${n.excludes.length} exclude(s) by name.</span>`);
+  if (n.not_on_slate?.length) notes.push(`<span class="dim">Saved-list players not on this slate: ${esc(n.not_on_slate.join(", "))}</span>`);
+  if (n.locks?.length || n.excludes?.length) notes.push(`<span class="dim">Applied ${n.locks.length} lock(s) and ${n.excludes.length} exclude(s) by name.</span>`);
   return notes;
 }
 
@@ -286,7 +429,7 @@ async function loadSlates(selectId) {
   try {
     const j = await api("/api/slate?list=1");
     $("slatePick").innerHTML = '<option value="">Latest</option>' + j.slates.map(s =>
-      `<option value="${s.id}">${s.date} · ${s.n_games} games</option>`).join("");
+      `<option value="${s.id}">${s.date} — ${s.n_games} games</option>`).join("");
     if (selectId) $("slatePick").value = String(selectId);
   } catch (e) { /* none yet */ }
 }
@@ -304,6 +447,28 @@ async function loadSlate(id) {
   } catch (e) { ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = true); }
 }
 
+/* ── lock countdown ───────────────────────────────────────────────────────────────────
+   Everything in DFS is before lock or after it, so the countdown is the one piece of
+   state worth showing at all times. It turns amber inside the last 20 minutes, the same
+   threshold the pre-lock alert fires on. */
+function lockTime() {
+  const games = current?.slate?.game_list || [];
+  const starts = games.map(g => +new Date(g.start)).filter(Number.isFinite);
+  return starts.length ? Math.min(...starts) : null;
+}
+
+function tickClock() {
+  const el = $("lockClock"), t = lockTime();
+  if (!t) { el.textContent = "no slate"; el.className = "clock gone"; return; }
+  const ms = t - Date.now();
+  if (ms <= 0) { el.textContent = "locked"; el.className = "clock gone"; return; }
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  el.textContent = h >= 24 ? Math.floor(h / 24) + "d " + pad(h % 24) + "h"
+                 : h ? h + ":" + pad(m) + ":" + pad(s % 60) : pad(m) + ":" + pad(s % 60);
+  el.className = "clock" + (ms < 20 * 60000 ? " soon" : "");
+}
+
 function tipInfo(start) {
   const ms = new Date(start) - Date.now();
   if (ms <= 0) return { locked: true, text: "locked" };
@@ -316,8 +481,10 @@ function renderGames() {
   const s = current.slate;
   $("games").innerHTML = (s.game_list || []).map(g => {
     const t = tipInfo(g.start), local = new Date(g.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    return `<span class="game ${t.locked ? "locked" : t.soon ? "soon" : ""}">${esc(g.game)} · ${local} · ${t.text}</span>`;
+    return `<span class="game ${t.locked ? "locked" : t.soon ? "soon" : ""}">${esc(g.game)}
+      <span class="t">${local}</span><span class="t">${t.text}</span></span>`;
   }).join("");
+  tickClock();
 }
 
 function flagsFor(lineupId) {
@@ -328,36 +495,41 @@ function lineupCard(lu) {
   const flags = flagsFor(lu.id), fk = new Map(flags.map(f => [f.key, f]));
   const rows = lu.players.map(p => {
     const f = fk.get(p.key), locked = p.game_start && new Date(p.game_start) <= Date.now();
-    const subs = f && !f.locked && f.suggestions.length ? `<tr><td colspan="7" class="subs">Swap ${esc(p.name)} (${esc(f.status)}) for:
-        ${f.suggestions.map(s => `<button class="sm" data-swap="${lu.id}:${p.key}:${s.key}">${esc(s.name)} ${money(s.salary)} · ${fmt(s.proj)} (${s.proj_delta >= 0 ? "+" : ""}${fmt(s.proj_delta)})</button>`).join("")}</td></tr>`
-      : f && f.locked ? `<tr><td colspan="7" class="subs">${esc(p.name)} is ${esc(f.status)} but his game has tipped; DK has him locked.</td></tr>` : "";
-    return `<tr class="${f ? "flag" : ""} ${locked ? "locked" : ""}"><td class="muted">${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
-      <td class="muted team">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj)}</td>
-      <td class="n muted">${fmt(p.own, 1)}%</td>${p.exposure !== undefined ? `<td class="n muted">${Math.round(p.exposure * 100)}%</td>` : "<td></td>"}</tr>${subs}`;
+    const subs = f && !f.locked && f.suggestions.length ? `<tr><td colspan="7" class="subs"><div class="subwrap">Swap ${esc(p.name)} (${esc(f.status)}) for:
+        ${f.suggestions.map(s => `<button class="sm" data-swap="${lu.id}:${p.key}:${s.key}">${esc(s.name)} ${money(s.salary)} &nbsp;${fmt(s.proj)} (${s.proj_delta >= 0 ? "+" : ""}${fmt(s.proj_delta)})</button>`).join("")}</div></td></tr>`
+      : f && f.locked ? `<tr><td colspan="7" class="subs"><div class="subwrap">${esc(p.name)} is ${esc(f.status)} but his game has tipped, so DK has him locked.</div></td></tr>` : "";
+    return `<tr class="${f ? "flag" : ""} ${locked ? "locked" : ""}"><td>${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
+      <td class="dim team">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj)}</td>
+      <td class="n dim">${fmt(p.own, 1)}%</td>${p.exposure !== undefined ? `<td class="n dim">${Math.round(p.exposure * 100)}%</td>` : "<td></td>"}</tr>${subs}`;
   }).join("");
   return `<div class="card ${lu.entered ? "entered" : ""}">
-    <div class="meta"><b style="color:var(--ink)">${lu.mode === "CONSENSUS" ? "Consensus" : "#" + lu.rank}</b><span>${money(lu.salary)}</span>
-      <span>proj ${fmt(lu.proj)}</span><span>ceil ${fmt(lu.ceil)}</span><span>own ${fmt(lu.own_sum, 0)}%</span>
+    <div class="meta"><span class="rank">${lu.mode === "CONSENSUS" ? "Consensus" : "#" + lu.rank}</span>
       ${lu.edited ? '<span class="warn">edited</span>' : ""}
-      ${lu.actual_score != null ? `<span>actual <b style="color:var(--ink)">${fmt(lu.actual_score)}</b></span>` : ""}
-      <label style="display:flex;gap:4px;align-items:center;margin-left:auto;color:var(--ink)"><input type="checkbox" data-entered="${lu.id}" ${lu.entered ? "checked" : ""}> entered</label></div>
-    ${lu.mode === "CONSENSUS" ? '<div class="muted small">Last column: share of GPP lineups using the player.</div>' : ""}
-    <table>${rows}</table></div>`;
+      ${lu.actual_score != null ? `<span>actual <b style="color:var(--chalk)">${fmt(lu.actual_score)}</b></span>` : ""}
+      <span class="proj">${fmt(lu.proj)}</span></div>
+    ${lu.mode === "CONSENSUS" ? '<div class="dim small" style="padding:8px 12px 0">Last column is the share of GPP lineups using the player.</div>' : ""}
+    <table>${rows}</table>
+    <div class="foot"><span><b>${money(lu.salary)}</b> of $50,000</span><span>ceil <b>${fmt(lu.ceil)}</b></span>
+      <span>own <b>${fmt(lu.own_sum, 0)}%</b></span>
+      <label><input type="checkbox" data-entered="${lu.id}" ${lu.entered ? "checked" : ""}> entered</label></div>
+  </div>`;
 }
 
 function render() {
   const s = current.slate;
   ["slateSec", "poolSec", "lowerSec"].forEach(x => $(x).hidden = false);
-  $("slateTitle").innerHTML = `${esc(s.date)} · ${s.n_games} games <span class="muted small" style="font-weight:400">built ${current.run ? new Date(current.run.built_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"} · params v${current.run?.params_version ?? "–"}</span>`;
+  $("buildPanel").open = false;
+  $("slateTitle").innerHTML = `Lineups <span class="sub">built ${current.run ? new Date(current.run.built_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"} on params v${current.run?.params_version ?? "–"}</span>`;
+  $("barSlate").textContent = `${s.date} — ${s.n_games} games`;
   renderGames();
   const snap = (current.job_runs || []).find(r => r.job === "snapshot");
-  if (!snap) $("jobStatus").innerHTML = '<span class="warn">Automatic lineup checks haven\'t run yet (scheduler not set up).</span>';
+  if (!snap) $("jobStatus").innerHTML = 'Automatic lineup checks have not run yet.';
   else {
     const ago = Math.round((Date.now() - new Date(snap.started_at)) / 60000);
     const errs = Object.entries(snap.errors || {}).map(([k, v]) => k + ": " + v).join("; ");
-    $("jobStatus").innerHTML = `Last automatic lineup check ${ago < 90 ? ago + " min" : Math.round(ago / 60) + " h"} ago ` +
+    $("jobStatus").innerHTML = `Last automatic check ${ago < 90 ? ago + " min" : Math.round(ago / 60) + " h"} ago ` +
       (snap.ok ? '<span class="good">✓</span>' : `<span class="bad">✗ ${esc(errs)}</span>`) +
-      (ago > 45 && (current.slate.game_list || []).some(g => new Date(g.start) > Date.now()) ? ' <span class="warn">— overdue; check the scheduler</span>' : "");
+      (ago > 45 && (current.slate.game_list || []).some(g => new Date(g.start) > Date.now()) ? ' <span class="warn">overdue, check the scheduler</span>' : "");
   }
   const modes = MODES.filter(([m]) => current.lineups[m]);
   if (!modes.some(([m]) => m === mode)) mode = modes[0]?.[0] || "GPP";
@@ -365,19 +537,19 @@ function render() {
     `<button type="button" aria-pressed="${m === mode}" data-m="${m}">${label} (${current.lineups[m].length})</button>`).join("");
   $("modeTabs").querySelectorAll("button").forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
   $("exMode").href = `/api/slate?id=${s.id}&export=${mode}`;
-  $("exModeBtn").textContent = `DK upload CSV · ${MODES.find(([m]) => m === mode)?.[1] || mode}`;
+  $("exModeBtn").textContent = `DK upload CSV`;
   $("exEntered").href = `/api/slate?id=${s.id}&export=ENTERED`;
 
   const cost = current.lineups[mode]?.[0]?.cost_vs_unconstrained;
   const lk = current.lineups[mode]?.[0];
-  $("costMsg").innerHTML = cost ? `<div class="msg alert" style="margin-bottom:10px">Locks/excludes cost the top ${esc(mode)} lineup
-      <b>${cost.proj >= 0 ? "+" : ""}${fmt(cost.proj)} proj</b> (objective ${cost.objective >= 0 ? "+" : ""}${fmt(cost.objective)}) versus the
+  $("costMsg").innerHTML = cost ? `<div class="msg alert" style="margin-bottom:12px">Locks and excludes cost the top ${esc(mode)} lineup
+      <b>${cost.proj >= 0 ? "+" : ""}${fmt(cost.proj)} proj</b> (objective ${cost.objective >= 0 ? "+" : ""}${fmt(cost.objective)}) against the
       unconstrained build (${fmt(cost.unconstrained_proj)}). Locked ${lk.locks.length}, excluded ${lk.excludes.length}.</div>` : "";
 
   const entered = (current.entered_other_runs || []).filter(l => l.mode === mode);
   $("lineups").innerHTML = (current.lineups[mode] || []).map(lineupCard).join("") +
-    (entered.length ? `<div class="muted small" style="grid-column:1/-1">Entered from earlier builds:</div>` + entered.map(lineupCard).join("") : "") ||
-    '<p class="muted">No lineups for this mode.</p>';
+    (entered.length ? `<div class="dim small" style="grid-column:1/-1">Entered from earlier builds</div>` + entered.map(lineupCard).join("") : "") ||
+    '<p class="dim">No lineups for this mode.</p>';
   $("lineups").querySelectorAll("[data-entered]").forEach(cb => cb.onchange = async () => {
     try { await post("/api/lineup", { id: +cb.dataset.entered, action: "entered", value: cb.checked }); await loadSlate(s.id); }
     catch (e) { alert(e.message); cb.checked = !cb.checked; }
@@ -396,28 +568,28 @@ function renderResults() {
   const g = current.grade?.payload;
   $("resultsSec").hidden = !g;
   if (!g) return;
-  $("resultsWhen").textContent = "· graded " + new Date(current.grade.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  $("resultsWhen").textContent = "graded " + new Date(current.grade.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const h = g.hindsight_optimal, ent = g.lineups?.entered || [], best = g.lineups?.best_generated;
-  const row = (k, v) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`;
+  const row = (k, v) => `<tr><td class="dim">${k}</td><td>${v}</td></tr>`;
   const bias = Object.entries(g.bias_by_bucket || {}).filter(([, b]) => b).map(([k, b]) =>
     `<tr><td>${esc(k.replaceAll("_", " "))}</td><td class="n">${b.n}</td><td class="n ${b.mean_error >= 0 ? "good" : "bad"}">${b.mean_error >= 0 ? "+" : ""}${fmt(b.mean_error)}</td></tr>`).join("");
   const games = Object.entries(g.bias_by_game || {}).map(([k, b]) =>
     `<tr><td>${esc(k)}</td><td class="n">${fmt(b.projected_total_dk, 0)}</td><td class="n">${fmt(b.actual_total_dk, 0)}</td><td class="n ${b.mean_error >= 0 ? "good" : "bad"}">${b.mean_error >= 0 ? "+" : ""}${fmt(b.mean_error)}</td></tr>`).join("");
-  const vb = Object.entries(g.value_board_hits || {}).map(([k, v]) => `${k}: ${v.hit_25}/${v.n}`).join(" · ");
+  const vb = Object.entries(g.value_board_hits || {}).map(([k, v]) => `${k}: ${v.hit_25}/${v.n}`).join("   ");
   $("results").innerHTML = `<div class="two">
     <div><table>
-      ${row("Your entered lineups", ent.length ? ent.map(e => `${e.mode} #${e.rank}: <b>${fmt(e.actual)}</b> (proj ${fmt(e.proj)})`).join("<br>") : '<span class="muted">none marked entered</span>')}
+      ${row("Your entered lineups", ent.length ? ent.map(e => `${e.mode} #${e.rank}: <b>${fmt(e.actual)}</b> (proj ${fmt(e.proj)})`).join("<br>") : '<span class="dim">none marked entered</span>')}
       ${row("Best generated lineup", best ? `${best.mode} #${best.rank}: <b>${fmt(best.actual)}</b>` : "–")}
-      ${row("Hindsight-perfect lineup", h ? `<b>${fmt(h.score)}</b> using ${money(h.salary)} · shape: ${h.salary_shape.under_4500} under $4.5K, ${h.salary_shape["4500_6500"]} $4.5–6.5K, ${h.salary_shape["6500_8000"]} $6.5–8K, ${h.salary_shape["8000_plus"]} $8K+` : "–")}
-      ${row("Projection error (avg)", `ours <b>${fmt(g.mae_ours, 2)}</b> vs RotoGrinders ${fmt(g.mae_rotogrinders, 2)} over ${g.n_players} players`)}
+      ${row("Hindsight-perfect lineup", h ? `<b>${fmt(h.score)}</b> using ${money(h.salary)}, shape ${h.salary_shape.under_4500} under $4.5K, ${h.salary_shape["4500_6500"]} $4.5–6.5K, ${h.salary_shape["6500_8000"]} $6.5–8K, ${h.salary_shape["8000_plus"]} $8K+` : "–")}
+      ${row("Projection error (avg)", `ours <b>${fmt(g.mae_ours, 2)}</b> against RotoGrinders ${fmt(g.mae_rotogrinders, 2)} over ${g.n_players} players`)}
       ${row("Value board 25+ hits", esc(vb) || "–")}
     </table>
-    <p class="muted small">One slate is one draw: these numbers become meaningful across many graded slates, which is when the learner uses them.</p></div>
+    <p class="dim small">One slate is one draw. These numbers become meaningful across many graded slates, which is when the learner uses them.</p></div>
     <div><b class="small">Best plays we missed</b><table>${(g.missed_plays || []).map(m =>
-      `<tr><td>${esc(m.name)}</td><td class="n">${money(m.salary)}</td><td class="n">${fmt(m.actual)} <span class="muted">(proj ${fmt(m.proj)})</span></td><td class="n muted">${fmt(m.own)}%</td></tr>`).join("")}</table>
-    ${h ? `<b class="small">Hindsight-perfect lineup</b><table>${h.players.map(p => `<tr><td class="muted">${p.slot}</td><td>${esc(p.name)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.actual)} <span class="muted">(proj ${fmt(p.proj)})</span></td></tr>`).join("")}</table>` : ""}</div>
+      `<tr><td>${esc(m.name)}</td><td class="n">${money(m.salary)}</td><td class="n">${fmt(m.actual)} <span class="dim">(proj ${fmt(m.proj)})</span></td><td class="n dim">${fmt(m.own)}%</td></tr>`).join("")}</table>
+    ${h ? `<b class="small">Hindsight-perfect lineup</b><table>${h.players.map(p => `<tr><td class="dim">${p.slot}</td><td>${esc(p.name)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.actual)} <span class="dim">(proj ${fmt(p.proj)})</span></td></tr>`).join("")}</table>` : ""}</div>
   </div>
-  <details><summary>Projection bias by signal and by game</summary><div class="two">
+  <details class="tools" style="margin-top:12px"><summary class="small dim">Projection bias by signal and by game</summary><div class="two" style="margin-top:10px">
     <table><tr><th>Bucket</th><th class="n">n</th><th class="n">actual − proj</th></tr>${bias}</table>
     <table><tr><th>Game</th><th class="n">Proj DK</th><th class="n">Actual DK</th><th class="n">avg miss</th></tr>${games}</table>
   </div></details>`;
@@ -426,14 +598,14 @@ function renderResults() {
 function renderPool() {
   const q = $("poolSearch").value.trim().toLowerCase();
   const rows = current.pool.filter(p => !q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q);
-  $("lockCount").textContent = `${locks.size} locked · ${excludes.size} excluded`;
+  $("lockCount").textContent = `${locks.size} locked, ${excludes.size} excluded`;
   $("poolTable").innerHTML = `<tr><th></th><th>Player</th><th>Pos</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
       <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
     rows.slice(0, 300).map(p => `<tr><td><button class="sm lock" aria-pressed="${locks.has(p.key)}" data-lock="${p.key}">Lock</button>
         <button class="sm excl" aria-pressed="${excludes.has(p.key)}" data-excl="${p.key}">Exclude</button></td>
-      <td>${esc(p.name)}</td><td class="muted">${esc(p.pos)}</td><td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
+      <td>${esc(p.name)}</td><td class="dim">${esc(p.pos)}</td><td class="dim">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
       <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
-      <td class="n muted">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
+      <td class="n dim">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
   $("poolTable").querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {
     const k = +b.dataset.lock; locks.has(k) ? locks.delete(k) : (locks.add(k), excludes.delete(k)); renderPool(); });
   $("poolTable").querySelectorAll("[data-excl]").forEach(b => b.onclick = () => {
@@ -445,30 +617,32 @@ function renderLower() {
       <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th></tr>` +
     current.value_board.map(p => `<tr><td><span class="grade g${p.value_grade}">${p.value_grade}</span></td>
       <td>${esc(p.name)}${p.inj_status ? ` <span class="warn">${esc(p.inj_status)}</span>` : ""}</td>
-      <td class="muted">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.minutes, 0)}</td>
+      <td class="dim">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.minutes, 0)}</td>
       <td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
-      <td class="n muted">${fmt(p.own_pct)}%${p.own_estimated ? "*" : ""}</td></tr>`).join("");
+      <td class="n dim">${fmt(p.own_pct)}%${p.own_estimated ? "*" : ""}</td></tr>`).join("");
   $("watch").innerHTML = current.watch.length ? `<tr><th>Player</th><th>Team</th><th>Status</th><th class="n">Salary</th><th class="n">Proj (adj)</th></tr>` +
-    current.watch.map(p => `<tr><td>${esc(p.name)}</td><td class="muted">${esc(p.team)}</td>
+    current.watch.map(p => `<tr><td>${esc(p.name)}</td><td class="dim">${esc(p.team)}</td>
       <td class="${p.contingent || ["O", "OUT", "NOPROJ"].includes(p.inj_status) ? "bad" : "warn"}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td>
       <td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj_adj)}</td></tr>`).join("")
-    : '<tr><td class="muted">Nobody flagged.</td></tr>';
+    : '<tr><td class="dim">Nobody flagged.</td></tr>';
 }
 
 function showCheck(res) {
   checkResult = res;
   const live = res.flags.filter(f => !f.locked);
+  $("recheck").hidden = false;
   $("checkMsg").innerHTML = res.flags.length
-    ? `<span class="bad"><b>${res.flags.length}</b> flagged spot${res.flags.length > 1 ? "s" : ""}</span> in ${res.checked_lineups} lineups
-       (${live.length} still swappable). Swap buttons are under each flagged player.`
-    : `<span class="good">All clear</span>: nobody in ${res.checked_lineups} saved lineups is Out, Doubtful, Questionable or missing a projection.`;
+    ? `<span class="warn">${res.flags.length} flagged spot${res.flags.length > 1 ? "s" : ""}</span> across ${res.checked_lineups} lineups,
+       ${live.length} still swappable. The swaps are under each flagged player.`
+    : `<span class="good">All clear.</span> <span class="dim">Nobody in ${res.checked_lineups} saved lineups is Out, Doubtful, Questionable or missing a projection.</span>`;
   render();
 }
 
 $("slatePick").onchange = (e) => loadSlate(e.target.value);
 $("poolSearch").oninput = () => renderPool();
 $("clearLE").onclick = () => { locks.clear(); excludes.clear(); renderPool(); };
-$("checkBtn").onclick = () => { $("recheck").hidden = !$("recheck").hidden; };
+$("checkBtn").onclick = () => { $("recheck").hidden = false; $("recheck").querySelector(".tools").open = true;
+                                $("recheck").scrollIntoView({ behavior: "smooth", block: "start" }); };
 $("checkOnlyBtn").onclick = async () => {
   try { showCheck(await api(`/api/slate?id=${current.slate.id}&check=1`)); } catch (e) { $("checkMsg").textContent = e.message; }
 };
@@ -480,6 +654,7 @@ $("refreshBtn").onclick = async () => {
       ...(rg ? { rg_b64: await fileB64(rg), rg_name: rg.name } : {}),
       ...(dk ? { dk_b64: await fileB64(dk), dk_name: dk.name } : {}) });
     await loadSlate(j.slate_id); showCheck(j.check);
+    if (j.degraded) $("checkMsg").insertAdjacentHTML("beforeend", `<div class="small warn" style="margin-top:8px">${esc(j.degraded)}</div>`);
   } catch (e) { $("checkMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
   finally { $("refreshBtn").disabled = false; }
 };
@@ -490,7 +665,7 @@ $("rebuildBtn").onclick = async () => {
       overrides: overrides(), locks: [...locks], excludes: [...excludes], contest: contestCtx(), ...nameFields() });
     const nn = nameNotes(j.names);
     await loadSlate(current.slate.id); $("slateSec").scrollIntoView({ behavior: "smooth" });
-    if (nn.length) $("costMsg").insertAdjacentHTML("afterbegin", `<div class="msg" style="margin-bottom:10px">${nn.join("<br>")}</div>`);
+    if (nn.length) $("costMsg").insertAdjacentHTML("afterbegin", `<div class="msg" style="margin-bottom:12px">${nn.join("<br>")}</div>`);
   } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = "Rebuild"; }
 };
 
@@ -499,20 +674,21 @@ $("buildForm").onsubmit = async (e) => {
   const btn = $("buildBtn"), msg = $("buildMsg"), dk = $("dkFile").files[0], rg = $("rgFile").files[0];
   const rgPaste = $("rgPaste").value.trim();
   if (!dk) { msg.innerHTML = '<div class="msg bad">Choose DKSalaries.csv.</div>'; return; }
-  btn.disabled = true; msg.innerHTML = '<div class="msg">Building… this takes up to a minute.</div>';
+  btn.disabled = true; msg.innerHTML = '<div class="msg">Building. This takes up to a minute.</div>';
   try {
     const rgPart = rg ? { rg_b64: await fileB64(rg), rg_name: rg.name } : rgPaste ? { rg_csv: rgPaste, rg_name: "pasted" } : {};
     const j = await post("/api/build", { action: "build", dk_b64: await fileB64(dk), dk_name: dk.name, ...rgPart,
       n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx(), ...nameFields() });
     const w = j.warnings, notes = nameNotes(j.names);
+    if (j.dk_coverage != null) notes.unshift(`<span class="dim">RotoGrinders covered <b style="color:var(--chalk)">${Math.round(j.dk_coverage * 100)}%</b> of the DraftKings pool.</span>`);
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
-    if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name + initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);
-    if (w.unmatched_lineup_names?.length) notes.push(`<span class="bad">${w.unmatched_lineup_names.length} names on the lineup pages didn't match anyone in the DK pool:</span> ${esc(w.unmatched_lineup_names.slice(0, 12).map(u => u.name + " (" + u.team + ", " + u.source + ")").join(", "))}`);
+    if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name and initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);
+    if (w.unmatched_lineup_names?.length) notes.push(`<span class="bad">${w.unmatched_lineup_names.length} names on the lineup pages did not match anyone in the DK pool:</span> ${esc(w.unmatched_lineup_names.slice(0, 12).map(u => u.name + " (" + u.team + ", " + u.source + ")").join(", "))}`);
     for (const [src, err] of Object.entries(w.lineup_source_errors || {})) notes.push(`<span class="bad">${esc(src)} lineups failed:</span> ${esc(err)}`);
     if (w.own_estimated) notes.push(`<span class="warn">${w.own_estimated} ownership values estimated</span> (not yet published).`);
     notes.push(`<span class="warn">${esc(w.starters_source)}.</span>`);
-    msg.innerHTML = `<div class="msg">Built ${j.players} players across ${j.games.length} games · params v${j.params_version}.<br>${notes.join("<br>")}</div>`;
+    msg.innerHTML = `<div class="msg">Built ${j.players} players across ${j.games.length} games, params v${j.params_version}.<br>${notes.join("<br>")}</div>`;
     await loadSlates(j.slate_id); await loadSlate(j.slate_id);
   } catch (err) { msg.innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
   finally { btn.disabled = false; }
@@ -528,15 +704,16 @@ $("stBtn").onclick = async () => {
     const j = await post("/api/build", { action: "import_contest", csv_b64: await fileB64(f), filename: f.name,
       meta: { dk_username: $("stUser").value.trim(), name: $("stName").value, entry_fee: $("stFee").value || null,
               prize_pool: $("stPool").value || null, places_paid: $("stPaid").value || null } });
-    $("stMsg").innerHTML = `<div class="msg">Contest ${j.contest_id}: ${j.entries.toLocaleString()} entries · winning score ${fmt(j.winning_score)}
-      ${j.min_cash_score != null ? "· min-cash " + fmt(j.min_cash_score) : ""} · your entries ${j.mine} (${j.matched_to_saved_lineups} matched to saved lineups)
-      · ownership for ${j.ownership_rows} players.${j.warnings.length ? "<br><span class='warn'>" + esc(j.warnings.join(" · ")) + "</span>" : ""}</div>`;
+    $("stMsg").innerHTML = `<div class="msg">Contest ${j.contest_id}: ${j.entries.toLocaleString()} entries, winning score ${fmt(j.winning_score)}
+      ${j.min_cash_score != null ? ", min-cash " + fmt(j.min_cash_score) : ""}. Your entries ${j.mine} (${j.matched_to_saved_lineups} matched to saved lineups),
+      ownership for ${j.ownership_rows} players.${j.warnings.length ? "<br><span class='warn'>" + esc(j.warnings.join("; ")) + "</span>" : ""}</div>`;
     if (j.slate_id) await loadSlate(j.slate_id);
   } catch (e) { $("stMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
   finally { $("stBtn").disabled = false; }
 };
 
 setInterval(() => { if (current) renderGames(); }, 30000);
+setInterval(tickClock, 1000);
 loadParams(); loadSlates(); loadSlate();
 </script>
 </body>
