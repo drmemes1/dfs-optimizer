@@ -209,14 +209,15 @@ players and numbers. The DraftKings lobby response is public data and may be com
    DraftKings group being built. A build that silently uses the wrong slate's projections is the
    most dangerous failure in this design, so the player count and slate label are verified against
    the DraftKings salary file rather than assumed.
-2. **Does the salary source decision change** now that RotoGrinders is known to carry salary and
-   multi-position eligibility? Owner's call; see Decisions.
+2. ~~Does the salary source decision change now that RotoGrinders carries salary and
+   multi-position eligibility?~~ **Resolved 2026-11-05: no.** Option C reconfirmed after the
+   correction was presented. See Decisions.
 
 ## Decisions
 
 | Decision | Reasoning |
 |---|---|
-| DraftKings salaries stay a manual upload (option C) | The draftables API blocks ordinary clients, and defeating that protection was rejected. Automating the owner's DraftKings login was rejected as disproportionate for a real-money account. **Correction:** this decision was also argued on the grounds that RotoGrinders would cost multi-position eligibility. That was wrong — RotoGrinders publishes both salary and `PG/SG`-style positions. The decision stands on the narrower remaining grounds: DraftKings' own file is authoritative for salary, position and `draftable_id`, RotoGrinders' salaries are second-hand and can be stale, and the page is slate-scoped (open question 1). Option B remains available and would make the 1pm build genuinely zero-touch; it should be validated against real uploads before being trusted, not adopted on the strength of one sample row. |
+| DraftKings salaries stay a manual upload (option C) | The draftables API blocks ordinary clients, and defeating that protection was rejected. Automating the owner's DraftKings login was rejected as disproportionate for a real-money account. **Correction:** this decision was also argued on the grounds that RotoGrinders would cost multi-position eligibility. That was wrong — RotoGrinders publishes both salary and `PG/SG`-style positions. The decision stands on the narrower remaining grounds: DraftKings' own file is authoritative for salary, position and `draftable_id`, RotoGrinders' salaries are second-hand and can be stale, and the page is slate-scoped (open question 1). Option B remains available and would make the 1pm build genuinely zero-touch; it should be validated against real uploads before being trusted, not adopted on the strength of one sample row. The owner reconfirmed C after being shown this correction, with the zero-touch cost stated explicitly. A further benefit of C: the DraftKings file is an independent cross-check that the RotoGrinders read returned the right slate, which directly mitigates open question 1. |
 | GitHub Actions as clock, logic on Vercel | RotoGrinders login needs no browser, so there is no reason to move credentials or logic into CI. One credential store, and the frequent pre-lock polling is cheap HTTP. |
 | Session cookie cached in Postgres | Keeps logins to roughly weekly instead of dozens nightly — directly serves the account-safety risk above. |
 | ntfy.sh for push | Free, no account, one HTTP call, and preserves the project's $0/month constraint. |
