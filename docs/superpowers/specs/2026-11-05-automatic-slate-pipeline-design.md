@@ -1,7 +1,7 @@
 # Automatic slate pipeline: unattended RotoGrinders reads and a pre-lock alert
 
 - **Date:** 2026-11-05
-- **Status:** design approved; awaiting implementation plan
+- **Status:** design approved; probe complete; awaiting implementation plan
 - **Supersedes:** the `PLAN.md` line "uploads stay manual (RotoGrinders is behind a login; no
   stored credentials)" — for RotoGrinders only. DraftKings uploads stay manual by choice.
 
@@ -52,9 +52,24 @@ receives the late-scratch picture so he can still change entries.
    `Apache/2.4.18 (Ubuntu)`; no Cloudflare headers, no challenge, no Turnstile. The form is
    `POST /sign-in` with inputs `username` and `password` and **no CSRF token**. A stdlib
    `urllib` request with a cookie jar is sufficient; no headless browser is required.
-2. **The projections table is absent from the logged-out HTML** (2 tables, 9 `<tr>` total). Whether
-   the logged-in page server-renders it or loads it by JavaScript is unresolved — see Open
-   questions.
+2. **Login works, and the logged-in table is server-rendered HTML.** Posting `username`/`password`
+   to `/sign-in` sets an `rguid` cookie (absent when logged out) and redirects to the homepage.
+   Measured on the 2026-11-05 two-game slate:
+
+   | | rows returned |
+   |---|---|
+   | no login | 7 (header only, no player data) |
+   | logged in | 55 — a 47-column header plus **54 data rows** |
+
+   All 54 rows carry real `FPTS` numbers. `html_to_table_text()` is therefore reusable as-is, and
+   no JavaScript rendering or headless browser is involved. The session cookie to cache is `rguid`.
+3. **The column contract in `PLAN.md` #14 is confirmed against the live page:** `FPTS`=28,
+   `FPTS/$`=29, `POWN`=30, `FLOOR`=33, `CEIL`=34, with `PLAYER`=0, `SALARY`=1, `POS`=2, `TEAM`=3,
+   `MINUTES`=6. Header-name lookup in `map_rg_headers()` stays the mechanism; these indices are
+   corroboration, not a new dependency.
+4. **RotoGrinders carries DraftKings salary *and* multi-position eligibility.** A sample row reads
+   `POS='PG/SG'`, `SALARY='8500'`. This contradicts the assumption used to reject option B when the
+   salary source was chosen — see Decisions.
 3. **`pick_main_slate()` is unsafe for unattended use.** It ranks Classic groups by prize pool with
    no date filter, and the lobby carries several days at once. Live data on 2026-11-05:
 
@@ -67,7 +82,7 @@ receives the late-scratch picture so he can still change entries.
 
    The top two differ by 0.4%, and the runner-up is a two-game 9pm slate. Prize pool alone cannot
    express "main draw", and today's date is not applied at all.
-4. **`api.draftkings.com` draftables returns HTTP 403 to ordinary clients**, not only from Vercel.
+5. **`api.draftkings.com` draftables returns HTTP 403 to ordinary clients**, not only from Vercel.
    DraftKings blocks non-browser access to that endpoint generally.
 
 ## Design
@@ -168,6 +183,11 @@ than silencing it.
 
 Test-driven, with network access behind the `fetch=` injection seam `jobs.snapshot()` already uses.
 
+**Fixtures must be synthetic.** The repository is public, so captured RotoGrinders projections must
+never be committed — that would redistribute subscriber-only data and is exactly what `PLAN.md`
+rules out elsewhere. Table fixtures are hand-written in RotoGrinders' column layout with invented
+players and numbers. The DraftKings lobby response is public data and may be committed as-is.
+
 1. **Slate picker** against a fixture of the real 2026-11-05 lobby: must choose the 7-game 7:00pm
    group and must not choose the 2-game 9:00pm group despite the 0.4% prize gap; must respect the
    target date; must return nothing when no group starts in the window; must honor the override.
@@ -181,17 +201,22 @@ Test-driven, with network access behind the `fetch=` injection seam `jobs.snapsh
 
 ## Open questions
 
-1. **Is the logged-in projections table in the HTML, or loaded by JavaScript?** Unresolved pending a
-   login probe. If HTML, `rg_fetch.html_to_table_text()` is reused unchanged. If JavaScript, the
-   underlying JSON endpoint must be identified and a parser written for it; `rg_table.parse()`'s
-   column contract still applies. This changes implementation effort, not architecture, because
-   `html_to_table_text()` already fails loudly when the table is missing.
+1. **Which slate does the projections page show, and how is the main slate selected?** The observed
+   page returned 54 players — consistent with the evening's two-game slate, not a full main slate
+   (~180 players). The header carries a `SLATE` column at index 31, implying the page is
+   slate-scoped. Before the 1pm build can be trusted, the implementation must establish how to
+   request the main slate specifically, and assert the returned player count is plausible for the
+   DraftKings group being built. A build that silently uses the wrong slate's projections is the
+   most dangerous failure in this design, so the player count and slate label are verified against
+   the DraftKings salary file rather than assumed.
+2. **Does the salary source decision change** now that RotoGrinders is known to carry salary and
+   multi-position eligibility? Owner's call; see Decisions.
 
 ## Decisions
 
 | Decision | Reasoning |
 |---|---|
-| DraftKings salaries stay a manual upload (option C) | The draftables API blocks ordinary clients, and defeating that protection was rejected. Automating the owner's DraftKings login was rejected as disproportionate for a real-money account. Taking salaries from RotoGrinders would cost DraftKings' authoritative positions and multi-position eligibility, which the MILP depends on. The upload is one prompted tap and preserves correctness. |
+| DraftKings salaries stay a manual upload (option C) | The draftables API blocks ordinary clients, and defeating that protection was rejected. Automating the owner's DraftKings login was rejected as disproportionate for a real-money account. **Correction:** this decision was also argued on the grounds that RotoGrinders would cost multi-position eligibility. That was wrong — RotoGrinders publishes both salary and `PG/SG`-style positions. The decision stands on the narrower remaining grounds: DraftKings' own file is authoritative for salary, position and `draftable_id`, RotoGrinders' salaries are second-hand and can be stale, and the page is slate-scoped (open question 1). Option B remains available and would make the 1pm build genuinely zero-touch; it should be validated against real uploads before being trusted, not adopted on the strength of one sample row. |
 | GitHub Actions as clock, logic on Vercel | RotoGrinders login needs no browser, so there is no reason to move credentials or logic into CI. One credential store, and the frequent pre-lock polling is cheap HTTP. |
 | Session cookie cached in Postgres | Keeps logins to roughly weekly instead of dozens nightly — directly serves the account-safety risk above. |
 | ntfy.sh for push | Free, no account, one HTTP call, and preserves the project's $0/month constraint. |
