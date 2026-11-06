@@ -60,7 +60,10 @@
       server-rendered HTML once signed in (7 header-only rows signed out; a 47-column header plus
       data rows signed in). Split each <tr> innerText on tabs (not querySelectorAll('td'));
       FPTS=28, FPTS/$=29, pOWN=30, FLOOR=33, CEIL=34, SIM85=44; "-" = no tag. Columns are still
-      located by header name, never by position.
+      located by header name, never by position. The percentile columns carry the ordinal in the
+      label: 42=SIM50TH, 43=SIM66TH, 44=SIM85TH, 45=SIM90TH, 46=SIM99TH (observed live
+      2026-11-06). Accepted names stay exact so a neighbouring percentile can never be read as
+      the 85th.
 - Production deploy can wait; preview + the real database is the working setup for now.
 
 ## Binding rules

@@ -8,6 +8,9 @@ File format (tab-separated, written by the bookmarklet):
 
 Column positions for the numbers come from measured use of this page:
   FPTS=28, FPTS/$=29, POWN=30, FLOOR=33, CEIL=34, SIM85=44 (27 is PrizePicks scoring, NOT FPTS).
+The percentile columns are labelled with the ordinal - observed live 2026-11-06 as 42=SIM50TH,
+43=SIM66TH, 44=SIM85TH, 45=SIM90TH, 46=SIM99TH - so index 44 is the 85th and the accepted names
+stay exact: widening this to a prefix match would let SIM50TH or SIM90TH through as the 85th.
 They are checked against the header text; any mismatch refuses the file instead of guessing.
 Name/team/position/salary/minutes are found by header name. The injury column uses "-" for no tag."""
 import re
@@ -19,7 +22,7 @@ from .uploads import UploadError, _num
 MARKER = "#RG-TABLE"
 FIXED = {"fpts": 28, "fpts_per_k": 29, "own": 30, "floor": 33, "ceil": 34, "sim85": 44}
 EXPECT = {"fpts": ("FPTS",), "fpts_per_k": ("FPTS/$", "PT/$", "FPTS/$K", "VALUE"), "own": ("POWN", "OWN"),
-          "floor": ("FLOOR",), "ceil": ("CEIL",), "sim85": ("SIM85", "85")}
+          "floor": ("FLOOR",), "ceil": ("CEIL",), "sim85": ("SIM85TH", "SIM85", "85")}
 BY_NAME = {"name": ("PLAYER", "NAME"), "team": ("TEAM", "TM"), "pos": ("POS", "POSITION"),
            "salary": ("SAL", "SALARY"), "minutes": ("MIN", "MINS", "MINUTES", "PMIN", "PROJ MIN"),
            "inj": ("INJ", "INJURY", "STATUS")}

@@ -78,3 +78,21 @@ def test_not_connected_is_explained(monkeypatch):
     monkeypatch.delenv("RG_COOKIE", raising=False)
     with pytest.raises(rg_fetch.RGNotConnected, match="isn't connected"):
         rg_fetch.fetch_html()
+
+
+def test_accepts_rotogrinders_real_sim85th_header():
+    """Observed live on 2026-11-06: the page labels the percentile columns SIM50TH, SIM66TH,
+    SIM85TH, SIM90TH, SIM99TH. Index 44 is still the 85th, only the label carries the ordinal."""
+    h = _header()
+    h[42], h[43], h[44], h[45] = "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH"
+    out = parse_rg_projections(_file(_rows(), header=h))
+    assert out[0]["sim85"] == 58
+
+
+def test_still_refuses_a_different_percentile_at_the_sim85_column():
+    """The guard exists to stop the wrong percentile being read as the 85th. Widening it to
+    accept SIM85TH must not widen it to accept its neighbours."""
+    h = _header()
+    h[44] = "SIM90TH"
+    with pytest.raises(UploadError, match="column 44"):
+        parse(_file(_rows(), header=h))
