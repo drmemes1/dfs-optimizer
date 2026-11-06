@@ -12,3 +12,5 @@ __pycache__/
 data/
 *.csv
 !tests/fixtures/*.csv
+
+.superpowers/
