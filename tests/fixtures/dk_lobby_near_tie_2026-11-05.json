@@ -1,0 +1,69 @@
+{
+ "DraftGroups": [
+  {
+   "DraftGroupId": 156184,
+   "GameTypeId": 70,
+   "GameCount": 7,
+   "StartDate": "/Date(1794009600000)/",
+   "StartDateEst": "2026-11-06T19:00:00.0000000",
+   "ContestStartTimeSuffix": null,
+   "DraftGroupTag": "Featured"
+  },
+  {
+   "DraftGroupId": 156176,
+   "GameTypeId": 70,
+   "GameCount": 2,
+   "StartDate": "/Date(1793930400000)/",
+   "StartDateEst": "2026-11-05T21:00:00.0000000",
+   "ContestStartTimeSuffix": null,
+   "DraftGroupTag": "Featured"
+  },
+  {
+   "DraftGroupId": 156191,
+   "GameTypeId": 70,
+   "GameCount": 2,
+   "StartDate": "/Date(1794020400000)/",
+   "StartDateEst": "2026-11-06T22:00:00.0000000",
+   "ContestStartTimeSuffix": " (Night)",
+   "DraftGroupTag": "Featured"
+  },
+  {
+   "DraftGroupId": 156190,
+   "GameTypeId": 70,
+   "GameCount": 4,
+   "StartDate": "/Date(1794013200000)/",
+   "StartDateEst": "2026-11-06T20:00:00.0000000",
+   "ContestStartTimeSuffix": " (Turbo)",
+   "DraftGroupTag": "Featured"
+  },
+  {
+   "DraftGroupId": 156999,
+   "GameTypeId": 96,
+   "GameCount": 1,
+   "StartDate": "/Date(1794009600000)/",
+   "ContestStartTimeSuffix": null
+  }
+ ],
+ "Contests": [
+  {
+   "dg": 156184,
+   "po": 1033857
+  },
+  {
+   "dg": 156176,
+   "po": 1029974
+  },
+  {
+   "dg": 156191,
+   "po": 475586
+  },
+  {
+   "dg": 156190,
+   "po": 254522
+  },
+  {
+   "dg": 156999,
+   "po": 9000000
+  }
+ ]
+}

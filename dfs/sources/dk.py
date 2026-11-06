@@ -1,8 +1,12 @@
 """DraftKings: slate identification and draftables (authoritative salaries, positions, status)."""
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from ..http import get_json
+
+ET = ZoneInfo("America/New_York")
+MAIN_WINDOW_ET = (19, 20)   # the main draw tips 7:00-8:00pm ET; 7:30 and 8:00 starts are normal
 
 LOBBY_URL = "https://www.draftkings.com/lobby/getcontests?sport=NBA"
 DRAFTABLES_URL = "https://api.draftkings.com/draftgroups/v1/draftgroups/{dg}/draftables?format=json"
@@ -47,10 +51,36 @@ def classic_groups(lobby: dict) -> list[dict]:
     return sorted(out, key=lambda r: -r["prize_pool"])
 
 
-def pick_main_slate(lobby: dict) -> dict | None:
-    """The Classic group carrying the largest guaranteed prize money."""
+def _et(start):
+    """StartDateEst carries no offset, so a naive value is Eastern by definition. Pinning it
+    explicitly matters: Vercel runs in UTC, so astimezone() on a naive datetime would otherwise
+    read 7:00pm as 7:00pm UTC (2:00pm ET) and the window check would move with the server."""
+    if start is None:
+        return None
+    return (start.replace(tzinfo=ET) if start.tzinfo is None else start).astimezone(ET)
+
+
+def pick_main_slate(lobby: dict, date=None, override_group_id: int | None = None) -> dict | None:
+    """The main draw for a given ET date: the Classic group with the most games starting between
+    7:00pm and 8:00pm ET, prize pool breaking ties only.
+
+    Prize pool alone is not safe. On 2026-11-05 the richest Classic group was a 7-game 7:00pm
+    slate at $1,033,857 and the runner-up a 2-game 9:00pm slate at $1,029,974 - 0.38% apart. The
+    lobby also carries several days at once, so an unfiltered pick can return tomorrow's slate.
+    Returns None rather than guessing when nothing qualifies: a dark or late-only night is normal."""
     groups = classic_groups(lobby)
-    return groups[0] if groups else None
+    if override_group_id is not None:
+        return next((g for g in groups if g["draft_group_id"] == override_group_id), None)
+    target = date or datetime.now(ET).date()
+    lo, hi = MAIN_WINDOW_ET
+    eligible = []
+    for g in groups:
+        local = _et(g.get("start"))
+        if local and local.date() == target and lo <= local.hour <= hi:
+            eligible.append(g)
+    if not eligible:
+        return None
+    return max(eligible, key=lambda g: ((g.get("game_count") or 0), g["prize_pool"]))
 
 
 def parse_draftables(data: dict) -> dict:
