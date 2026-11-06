@@ -1,6 +1,6 @@
 """Scheduled jobs. Every run writes a job_runs row (ok / errors) so a broken scheduler is visible."""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import db, history, pipeline
 from .sources import lineups as lineup_sources
@@ -93,3 +93,76 @@ def grade(today=None, fetch_day=None) -> dict:
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}
+
+
+def _rg_table_text():
+    from .sources import rg_fetch
+    return rg_fetch.fetch_table_text()
+
+
+def _mark_alert(conn, slate_id, kind):
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO alerts_sent(slate_id, kind) VALUES (%s,%s)
+                       ON CONFLICT (slate_id, kind) DO NOTHING""", (slate_id, kind))
+    conn.commit()
+
+
+def prelock(now: datetime | None = None, fetch=None, rg_fetch_fn=None, push=None) -> dict:
+    """Called every five minutes through the evening. Reads today's slates and does nothing until
+    a slate is inside the alert lead, so almost every run touches only Postgres. Inside the lead
+    it re-reads RotoGrinders and the lineup pages, re-runs the late-scratch check and pushes one
+    alert per slate.
+
+    A failed sweep pushes the error: at 6:45pm "the check broke, go look yourself" is useful and
+    silence is not. The error is pushed once per slate, not on every five-minute tick, so a
+    source that is down all evening does not bury the phone."""
+    from . import notify, pipeline, prelock as pl
+    now = now or datetime.now(timezone.utc)
+    push = push or notify.push
+    with db.connect() as conn:
+        db.migrate(conn)
+        rid = _start(conn, "prelock")
+        errors, new_errors = {}, {}
+        summary = {"considered": 0, "alerted": [], "skipped": []}
+        with conn.cursor() as cur:
+            cur.execute("""SELECT s.id, s.date, s.lock_time_utc,
+                                  EXISTS (SELECT 1 FROM alerts_sent a
+                                          WHERE a.slate_id = s.id AND a.kind='prelock') AS sent,
+                                  EXISTS (SELECT 1 FROM alerts_sent a
+                                          WHERE a.slate_id = s.id AND a.kind='prelock_error') AS errored
+                           FROM slates s
+                           WHERE s.date BETWEEN %s AND %s
+                           ORDER BY s.lock_time_utc NULLS LAST""",
+                        (history.et_date(now) - timedelta(days=1), history.et_date(now)))
+            slates = cur.fetchall()
+        summary["considered"] = len(slates)
+        for s in slates:
+            if not pl.should_alert(s["lock_time_utc"], now, already_sent=s["sent"]):
+                summary["skipped"].append({"slate_id": s["id"],
+                                           "minutes_to_lock": pl.minutes_to_lock(s["lock_time_utc"], now)})
+                continue
+            try:
+                rg_text, _ = (rg_fetch_fn or _rg_table_text)()
+                out = pipeline.run_refresh(rg_text=rg_text, slate_id=s["id"], fetch=fetch, now=now,
+                                           save_raw_pages=False)
+                chk = out["check"]
+                title, body = pl.format_alert(str(s["date"]), chk["flags"], chk["checked_lineups"])
+                res = push(title=title, body=body, priority="high", tags="warning")
+                if not res.get("ok"):
+                    errors[f"push_{s['id']}"] = res.get("error") or "push failed"
+                    new_errors[f"push_{s['id']}"] = errors[f"push_{s['id']}"]
+                summary["alerted"].append({"slate_id": s["id"], "flags": len(chk["flags"]),
+                                           "swappable": sum(1 for f in chk["flags"] if not f["locked"])})
+            except Exception as e:  # noqa: BLE001 - recorded on the run AND pushed
+                msg = f"{type(e).__name__}: {e}"[:300]
+                errors[f"prelock_{s['id']}"] = msg
+                if not s["errored"]:
+                    new_errors[f"prelock_{s['id']}"] = msg
+                    push(title="Pre-lock check FAILED", priority="high", tags="rotating_light",
+                         body=f"Slate {s['id']} ({s['date']}): {msg}\nCheck your lineups by hand.")
+                    _mark_alert(conn, s["id"], "prelock_error")
+                continue
+            _mark_alert(conn, s["id"], "prelock")
+        ok = not errors
+        _finish(conn, rid, ok, summary, errors)
+    return {"ok": ok, "summary": summary, "errors": errors, "new_errors": new_errors}

@@ -29,6 +29,11 @@ def _get(h):
         # pending verification is normal early in the morning; only hard errors are a 500
         hard = {k: v for k, v in out["errors"].items() if "will retry" not in v}
         return send(h, 500 if hard else 200, out)
+    if job == "prelock":
+        out = jobs.prelock()
+        # only a newly-reported problem fails the workflow: a source that is down all evening
+        # would otherwise email on every one of the ~30 five-minute ticks
+        return send(h, 500 if out["new_errors"] else 200, out)
     send(h, 400, {"ok": False, "error": "unknown job"})
 
 
