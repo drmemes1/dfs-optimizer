@@ -30,18 +30,25 @@
     or you can grab the table from your browser with one click (backup).</p>
 
   <section>
-    <h2>Automatic: connect your RotoGrinders login (computer, ~2 minutes, every week or two)</h2>
+    <h2>Automatic: your RotoGrinders login (one-time setup)</h2>
+    <p>The optimizer signs in to RotoGrinders itself and reads the projections table. No cookie to
+      copy, and nothing to redo every week.</p>
     <ol>
-      <li>In Chrome, log in to rotogrinders.com and open <b>NBA → Projected Stats → DraftKings</b>.</li>
-      <li>Open developer tools (<b>F12</b>, or <b>Cmd+Option+I</b> on a Mac) → <b>Network</b> tab → reload the page.</li>
-      <li>Click the first request in the list (named like <code>nba?site=draftkings</code>) → <b>Headers</b> →
-        <b>Request Headers</b> → find <b>cookie</b> → right-click its value → <b>Copy value</b>.</li>
-      <li>Vercel → <b>dfs-optimizer</b> → Settings → Environment Variables → add <code>RG_COOKIE</code>, paste the value,
-        tick <b>Sensitive</b>, <b>Production</b> and <b>Preview</b> → Save → then redeploy production.</li>
+      <li>Change your RotoGrinders password to one you use <b>nowhere else</b>.</li>
+      <li>Vercel &rarr; <b>dfs-optimizer</b> &rarr; Settings &rarr; Environment Variables &rarr; add
+        <code>RG_USER</code> (your RotoGrinders username) and <code>RG_PASS</code>, each ticked
+        <b>Sensitive</b>, <b>Production</b> and <b>Preview</b> &rarr; Save &rarr; redeploy production.</li>
+      <li>Add <code>NTFY_TOPIC</code> the same way: a long random string you invent. Install the
+        <b>ntfy</b> app on your phone and subscribe to that exact string &mdash; it is how the
+        pre-lock alert reaches you, and the topic name is its only secret.</li>
     </ol>
-    <p class="muted">Never paste the cookie into a chat or anywhere else. It is your logged-in session: anyone with it can use
-      your RotoGrinders account until it expires. When it expires, builds say so and you can use the button below for that day.
-      Automated reading of your own account may go against RotoGrinders' terms of service; that choice is yours.</p>
+    <p class="muted">The session is cached, so sign-ins happen roughly weekly rather than on every
+      run. If the password is wrong, sign-in is attempted at most 3 times per 30 minutes rather
+      than every five minutes, so a bad password cannot hammer your account &mdash; builds will say
+      so, and the button below still works meanwhile. <code>RG_COOKIE</code> is still honored and
+      overrides the stored session if you ever need to paste one by hand.</p>
+    <p class="muted">Automated reading of your own account may go against RotoGrinders' terms of
+      service; that choice is yours.</p>
   </section>
 
   <section>
@@ -52,7 +59,9 @@
   </section>
 
   <section>
-    <h2>Each slate</h2>
+    <h2>Using the grabber, when the login is broken</h2>
+    <p class="muted">Normally you do none of this: the 1pm build reads RotoGrinders itself. Use these
+      steps only if a build says the sign-in failed.</p>
     <ol>
       <li>Open RotoGrinders → NBA → Projected Stats, <b>DraftKings</b>, logged in. Let the table load fully.</li>
       <li>Click <b>Grab RG projections</b> in your bookmarks bar. It downloads <code>rg-projections-DATE.tsv</code>,

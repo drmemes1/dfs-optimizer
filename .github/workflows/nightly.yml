@@ -1,0 +1,58 @@
+# Drives the two new jobs. Vercel Hobby cron runs only once a day, so this free GitHub schedule
+# is the clock. Needs the same three repository secrets as snapshots.yml: APP_URL, CRON_SECRET,
+# VERCEL_BYPASS_SECRET. No RotoGrinders credentials here - those live only in Vercel.
+name: nightly
+on:
+  schedule:
+    - cron: "5 18 * * *"          # ~1pm ET build (1pm EST; 2pm EDT - harmless, the job is idempotent)
+    - cron: "*/5 22-23 * * *"     # pre-lock sweep, covers 6-7pm ET in EDT and 5-6pm ET in EST
+    - cron: "*/5 0-2 * * *"       # ...continues through 9pm ET in both offsets
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "job to run (build or prelock)"
+        required: true
+        default: prelock
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Pick the job for this trigger
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          MANUAL: ${{ github.event.inputs.job }}
+        run: |
+          if [ -n "$MANUAL" ]; then echo "job=$MANUAL" >> "$GITHUB_OUTPUT"
+          elif [ "$SCHEDULE" = "5 18 * * *" ]; then echo "job=build" >> "$GITHUB_OUTPUT"
+          else echo "job=prelock" >> "$GITHUB_OUTPUT"; fi
+      - name: Call the job
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BYPASS: ${{ secrets.VERCEL_BYPASS_SECRET }}
+          JOB: ${{ steps.pick.outputs.job }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ] || [ -z "$BYPASS" ]; then
+            echo "::error::APP_URL, CRON_SECRET and VERCEL_BYPASS_SECRET must all be set"; exit 1
+          fi
+          APP_URL="${APP_URL%/}"
+          code=$(curl -sS -o out.json -D headers.txt -w '%{http_code}' --max-time 290 \
+            -H "Authorization: Bearer $CRON_SECRET" -H "x-vercel-protection-bypass: $BYPASS" \
+            "$APP_URL/api/cron?job=$JOB")
+          cat out.json; echo
+          case "$code" in
+            200) ;;
+            302|307|401|403)
+              loc=$(grep -i '^location:' headers.txt | tr -d '\r' || true)
+              if grep -qi 'sso-api\|vercel.com/login' headers.txt; then
+                echo "::error::Vercel's login wall rejected the request: VERCEL_BYPASS_SECRET does not match the project's Protection Bypass for Automation value ($loc)"
+              elif [ "$code" = "401" ]; then
+                echo "::error::The app rejected CRON_SECRET: the GitHub secret must equal the CRON_SECRET env var in Vercel"
+              else
+                echo "::error::$JOB returned HTTP $code $loc"
+              fi
+              exit 1 ;;
+            *) echo "::error::$JOB returned HTTP $code"; exit 1 ;;
+          esac

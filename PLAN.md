@@ -8,7 +8,13 @@
   Vercel, so we use DK's own CSV export instead of working around the block.
 - **Fetched automatically:** DK lobby (slate ID, lock time, game list), RotoGrinders + RotoWire lineups
   (starting fives, Vegas lines, injury news), StatMuse (box scores for grading).
-- **Not doing:** X/Twitter (API is paid; scraping breaks its terms), placing DK entries.
+- **Not doing:** X/Twitter (API is paid; scraping breaks its terms), placing DK entries,
+  automating the DraftKings login (real-money account; its draftables API answers 403 to ordinary
+  clients and defeating that was rejected).
+- **Credentials:** RotoGrinders only, as RG_USER/RG_PASS in Vercel (sensitive), with the session
+  cookie cached in Postgres so sign-ins stay roughly weekly. This reverses the original "no stored
+  credentials" rule for RotoGrinders alone; see docs/superpowers/specs/2026-11-05-automatic-slate-pipeline-design.md
+  for the reasoning and the accepted account risk.
 - **Learning:** every graded night is kept forever and the learner uses **all** of them each morning
   (recency-weighted, never discarded). Parameters move only from bias that holds across enough nights,
   ~1% per slate, and only if a replay over all stored past slates does not get worse. Frozen keys (ownership knobs, max_from_team, pool rule) are
@@ -42,10 +48,19 @@
 - [ ] #8 Recent-form check: implied DK pts/min vs last-5/last-10 actual rate, flag >15% required increase
       (needs a reachable game-log source; cdn.nba.com is blocked from Vercel)
 - [ ] News & buzz panel; backfill + Research page; accuracy-over-time chart
-- [ ] #13 Automation: uploads stay manual (RotoGrinders is behind a login; no stored credentials). Cron
-      only for jobs whose sources are reachable (grading), and every job reports failures visibly.
-- [ ] #14 If the RG projections *page* is ever parsed: split each <tr> innerText on tabs (not
-      querySelectorAll('td')); FPTS=28, FPTS/$=29, pOWN=30, FLOOR=33, CEIL=34, SIM85=44; "-" = no tag.
+- [x] #13 Automation: RotoGrinders is read with a stored login (RG_USER/RG_PASS in Vercel,
+      sensitive; session cookie cached in rg_session so logins stay roughly weekly, failures
+      capped at 3 per 30 minutes). DraftKings salaries stay a manual upload on purpose: the
+      draftables API blocks ordinary clients (403, not a Vercel-only block) and automating a
+      real-money DK login was rejected. The 1pm build prompts for that upload by push
+      notification instead of relying on memory. Jobs: build (1pm ET), snapshot (every 20 min),
+      prelock (every 5 min in the evening, alerts 15-20 min before lock). Every job reports
+      failures to the phone and to job_runs.
+- [x] #14 The RG projections *page* IS parsed. Confirmed live 2026-11-05: the table is
+      server-rendered HTML once signed in (7 header-only rows signed out; a 47-column header plus
+      data rows signed in). Split each <tr> innerText on tabs (not querySelectorAll('td'));
+      FPTS=28, FPTS/$=29, pOWN=30, FLOOR=33, CEIL=34, SIM85=44; "-" = no tag. Columns are still
+      located by header name, never by position.
 - Production deploy can wait; preview + the real database is the working setup for now.
 
 ## Binding rules
