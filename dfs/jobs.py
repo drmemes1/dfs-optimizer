@@ -166,3 +166,96 @@ def prelock(now: datetime | None = None, fetch=None, rg_fetch_fn=None, push=None
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors, "new_errors": new_errors}
+
+
+MIN_RG_DK_OVERLAP = 0.6
+
+
+def _stored_dk_text(conn, slate_date):
+    """The most recent DKSalaries upload for a slate on this ET date, or None. Decoded the same
+    way pipeline._stored_upload does it, so a BOM-prefixed export reads identically."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT x.raw FROM source_snapshots x JOIN slates s ON s.id = x.slate_id
+                       WHERE s.date = %s AND x.source = 'dk_salaries_csv' AND x.raw IS NOT NULL
+                       ORDER BY x.fetched_at DESC, x.id DESC LIMIT 1""", (slate_date,))
+        r = cur.fetchone()
+    return bytes(r["raw"]).decode("utf-8-sig", errors="replace") if r else None
+
+
+def _dk_names(dk_text):
+    from .sources.uploads import parse_dk_salaries
+    return [p["name"] for p in parse_dk_salaries(dk_text)["players"]]
+
+
+def _rg_names(rg_text):
+    from .sources.rg_table import parse
+    return [r["name"] for r in parse(rg_text)["rows"]]
+
+
+def build(now: datetime | None = None, lobby_fn=None, rg_fetch_fn=None, push=None,
+          build_fn=None, override_group_id=None) -> dict:
+    """The 1pm job. Identifies today's main slate and builds from the stored DKSalaries upload
+    plus freshly read RotoGrinders projections.
+
+    DraftKings salaries stay a manual upload by decision (the draftables API blocks ordinary
+    clients and automating a real-money login was rejected), so the single manual step is
+    *prompted* here rather than remembered: a missing upload pushes a nudge with hours of runway
+    before lock."""
+    from . import notify, pipeline, prelock as pl
+    from .sources import dk
+    now = now or datetime.now(timezone.utc)
+    push = push or notify.push
+    today = history.et_date(now)
+    with db.connect() as conn:
+        db.migrate(conn)
+        db.seed_params(conn)
+        rid = _start(conn, "build")
+        errors, summary = {}, {"date": str(today)}
+        try:
+            lobby = (lobby_fn or dk.fetch_lobby)()
+            main = dk.pick_main_slate(lobby, date=today, override_group_id=override_group_id)
+            if not main:
+                summary["main_slate"] = None
+                push(title="No main slate tonight", priority="low", tags="zzz",
+                     body=f"{today}: no Classic group starts 7-8pm ET. Nothing to build.")
+                _finish(conn, rid, True, summary, errors)
+                return {"ok": True, "summary": summary, "errors": errors}
+            summary["main_slate"] = {"draft_group_id": main["draft_group_id"],
+                                     "games": main.get("game_count"),
+                                     "start": str(main.get("start"))}
+            dk_text = _stored_dk_text(conn, today)
+            if not dk_text:
+                summary["blocked"] = "no dk_salaries_csv upload"
+                push(title="Upload DKSalaries.csv", priority="high", tags="warning",
+                     body=(f"{today}: main slate is {main.get('game_count')} games at "
+                           f"{main.get('start')}, but no DKSalaries.csv is stored yet. "
+                           "Upload it and the build will run."))
+                _finish(conn, rid, True, summary, errors)
+                return {"ok": True, "summary": summary, "errors": errors}
+            rg_text, _ = (rg_fetch_fn or _rg_table_text)()
+            overlap = pl.overlap_ratio(_rg_names(rg_text), _dk_names(dk_text))
+            summary["rg_dk_overlap"] = round(overlap, 3)
+            if overlap < MIN_RG_DK_OVERLAP:
+                msg = (f"RotoGrinders returned players matching only {overlap:.0%} of the "
+                       f"DraftKings pool (need {MIN_RG_DK_OVERLAP:.0%}); refusing to build from "
+                       "what looks like a different slate")
+                errors["slate_overlap"] = msg
+                push(title="Build refused - wrong slate", priority="high", tags="rotating_light",
+                     body=f"{today}: {msg}. Build by hand from the page.")
+                _finish(conn, rid, False, summary, errors)
+                return {"ok": False, "summary": summary, "errors": errors}
+            out = (build_fn or pipeline.run_build)(dk_text=dk_text, rg_text=rg_text) or {}
+            summary.update({k: out[k] for k in ("slate_id", "run_id") if k in out})
+            res = push(title="Lineups ready", priority="default", tags="basketball",
+                       body=(f"{today}: built for the {main.get('game_count')}-game slate. "
+                             f"{summary.get('rg_dk_overlap', 0):.0%} pool match. Review and enter."))
+            if not res.get("ok"):
+                errors["push"] = res.get("error") or "push failed"
+        except Exception as e:  # noqa: BLE001 - recorded on the run AND pushed
+            msg = f"{type(e).__name__}: {e}"[:300]
+            errors["build"] = msg
+            push(title="1pm build FAILED", priority="high", tags="rotating_light",
+                 body=f"{today}: {msg}\nBuild by hand before lock.")
+        ok = not errors
+        _finish(conn, rid, ok, summary, errors)
+    return {"ok": ok, "summary": summary, "errors": errors}

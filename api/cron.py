@@ -34,6 +34,9 @@ def _get(h):
         # only a newly-reported problem fails the workflow: a source that is down all evening
         # would otherwise email on every one of the ~30 five-minute ticks
         return send(h, 500 if out["new_errors"] else 200, out)
+    if job == "build":
+        out = jobs.build()
+        return send(h, 500 if out["errors"] else 200, out)
     send(h, 400, {"ok": False, "error": "unknown job"})
 
 
