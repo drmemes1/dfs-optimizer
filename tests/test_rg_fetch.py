@@ -167,7 +167,7 @@ class _FakeCursor:
         s = " ".join(sql.split()).lower()
         if s.startswith("select"):
             self._last = dict(self.state)
-        elif "failures = failures + 1" in s:
+        elif "failures = rg_session.failures + 1" in s:
             self.state["failures"] = self.state.get("failures", 0) + 1
             self.state["last_failure_at"] = params[0] if params else None
         elif "failures = 0" in s:
@@ -178,3 +178,78 @@ class _FakeCursor:
 
     def fetchone(self):
         return self._last
+
+
+# ---------- _session_html: the retry path the spec requires ----------
+
+def _conn_with(state):
+    return _FakeConn(state)
+
+
+def test_a_rejected_cookie_causes_exactly_one_relogin_and_one_retry(monkeypatch):
+    monkeypatch.delenv("RG_COOKIE", raising=False)
+    state = {"cookie": "rguid=stale", "acquired_at": NOW, "failures": 0, "last_failure_at": None}
+    logins, reads = [], []
+
+    def fake_fetch_html(cookie=None):
+        reads.append(cookie)
+        if cookie == "rguid=stale":
+            raise rg_fetch.RGNotConnected("sent us to its sign-in page")
+        return "<html>ok</html>"
+
+    monkeypatch.setattr(rg_fetch, "fetch_html", fake_fetch_html)
+    monkeypatch.setattr(rg_fetch, "login", lambda **kw: logins.append(1) or "rguid=fresh")
+    assert rg_fetch._session_html(_conn_with(state)) == "<html>ok</html>"
+    assert len(logins) == 1, "exactly one re-login"
+    assert reads == ["rguid=stale", "rguid=fresh"], "exactly one retry"
+
+
+def test_a_second_rejection_raises_and_is_counted_against_the_backoff(monkeypatch):
+    """I1: login succeeds but the page still rejects the session (lapsed subscription, IP block).
+    _store_session resets failures to 0, so without counting this the cap can never trip and we
+    log in on every single read, forever."""
+    monkeypatch.delenv("RG_COOKIE", raising=False)
+    state = {"cookie": "rguid=stale", "acquired_at": NOW, "failures": 0, "last_failure_at": None}
+
+    monkeypatch.setattr(rg_fetch, "fetch_html",
+                        lambda cookie=None: (_ for _ in ()).throw(
+                            rg_fetch.RGNotConnected("sent us to its sign-in page")))
+    monkeypatch.setattr(rg_fetch, "login", lambda **kw: "rguid=fresh")
+    with pytest.raises(rg_fetch.RGNotConnected):
+        rg_fetch._session_html(_conn_with(state))
+    assert state["failures"] == 1, "an unusable session must count toward the cooldown"
+    assert state["cookie"] is None, "and must not be left cached for the next run"
+
+
+def test_a_stale_manual_override_does_not_destroy_the_stored_session(monkeypatch):
+    """M5: RG_COOKIE wins in session_cookie, so clearing the DB session on its failure throws
+    away a possibly-good cookie that had nothing to do with the problem."""
+    monkeypatch.setenv("RG_COOKIE", "rguid=manual-stale")
+    state = {"cookie": "rguid=good", "acquired_at": NOW, "failures": 0, "last_failure_at": None}
+    monkeypatch.setattr(rg_fetch, "fetch_html",
+                        lambda cookie=None: (_ for _ in ()).throw(
+                            rg_fetch.RGNotConnected("sign-in page")))
+    with pytest.raises(rg_fetch.RGNotConnected):
+        rg_fetch._session_html(_conn_with(state))
+    assert state["cookie"] == "rguid=good", "the stored session is untouched"
+    assert state["failures"] == 0
+
+
+def test_the_real_cookie_jar_is_read_when_the_opener_has_no_cookies_attribute(monkeypatch):
+    """_opener_cookies' production branch is never reached by FakeOpener, so login() could fail
+    every night with a green suite."""
+    import http.cookiejar
+    import urllib.request
+    monkeypatch.setenv("RG_USER", "u")
+    monkeypatch.setenv("RG_PASS", "p")
+    jar = http.cookiejar.CookieJar()
+    real = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    jar.set_cookie(http.cookiejar.Cookie(
+        0, "rguid", "abc", None, False, "rotogrinders.com", True, False, "/", True,
+        False, None, True, None, None, {}))
+
+    monkeypatch.setattr(real, "open",
+                        lambda req, timeout=None: FakeResponse("<html>home</html>",
+                                                               "https://rotogrinders.com/"))
+    cookie = rg_fetch.login(opener_factory=lambda: real)
+    assert "rguid=abc" in cookie

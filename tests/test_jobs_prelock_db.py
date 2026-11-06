@@ -116,3 +116,58 @@ def test_a_repeated_failure_is_not_reported_as_new(monkeypatch):
     assert f"prelock_{sid}" in first["new_errors"], "the first failure is new; fail the workflow"
     assert f"prelock_{sid}" in second["errors"], "still recorded on the run"
     assert f"prelock_{sid}" not in second["new_errors"], "no longer new, so the workflow stays green"
+
+
+def test_a_failed_send_does_not_consume_the_one_shot_alert(monkeypatch):
+    """C2: a 30-second notifier outage at T-18 must not silence T-13, T-8 and T-3. The lead is
+    20 minutes and ticks are 5 apart, so retries are free."""
+    sid, day = _make(monkeypatch, 17, 990106, "M@N")
+    from dfs import jobs
+    monkeypatch.setattr("dfs.pipeline.run_refresh",
+                        lambda **kw: {"slate_id": kw["slate_id"],
+                                      "check": {"checked_lineups": 1, "flags": [], "checked_at": "x"}})
+    sends = []
+
+    def flaky(**kw):
+        sends.append(kw)
+        ok = len(sends) > 1           # first attempt fails, second succeeds
+        return {"ok": ok, "error": None if ok else "resend 502", "unconfigured": False}
+
+    kw = dict(rg_fetch_fn=lambda: ("#RG-TABLE\tx\tx\t1", b""), push=flaky)
+    jobs.prelock(now=lock_at(17) - timedelta(minutes=18), **kw)
+    out2 = jobs.prelock(now=lock_at(17) - timedelta(minutes=13), **kw)
+    assert len(_mine(sends, day)) == 2, "the next tick must retry after a failed send"
+    assert _alerted(out2, sid), "and the retry must actually alert"
+
+
+def test_alerts_switched_off_is_not_reported_as_an_error(monkeypatch):
+    """I3/Focus 5: with no transport configured the sweep still does its work, and 'off' must not
+    be recorded as a failure or it fails the workflow on every successful sweep."""
+    sid, _ = _make(monkeypatch, 20, 990107, "O@P")
+    from dfs import jobs
+    monkeypatch.setattr("dfs.pipeline.run_refresh",
+                        lambda **kw: {"slate_id": kw["slate_id"],
+                                      "check": {"checked_lineups": 1, "flags": [], "checked_at": "x"}})
+    out = jobs.prelock(now=lock_at(20) - timedelta(minutes=18),
+                       rg_fetch_fn=lambda: ("#RG-TABLE\tx\tx\t1", b""),
+                       push=lambda **kw: {"ok": False, "unconfigured": True, "error": "no transport"})
+    assert _alerted(out, sid), "the sweep's real work still happened"
+    assert f"push_{sid}" not in out["errors"], "switched off is not a failure"
+    assert out["new_errors"] == {}
+
+
+def test_a_degraded_sweep_says_so_in_the_alert(monkeypatch):
+    """If the fresh RotoGrinders read was rejected as another slate's, run_refresh falls back to
+    the stored projections. The alert must say the numbers are not fresh."""
+    sid, _ = _make(monkeypatch, 23, 990108, "Q@R")
+    from dfs import jobs
+    monkeypatch.setattr("dfs.pipeline.run_refresh",
+                        lambda **kw: {"slate_id": kw["slate_id"],
+                                      "degraded": "the fresh RotoGrinders read matched only 11%",
+                                      "check": {"checked_lineups": 1, "flags": [], "checked_at": "x"}})
+    pushes = []
+    out = jobs.prelock(now=lock_at(23) - timedelta(minutes=18),
+                       rg_fetch_fn=lambda: ("#RG-TABLE\tx\tx\t1", b""),
+                       push=lambda **kw: pushes.append(kw) or {"ok": True, "error": None})
+    assert [a for a in out["summary"]["alerted"] if a["slate_id"] == sid][0]["degraded"]
+    assert any("11%" in p["body"] for p in pushes), "the user must know the projections are stale"

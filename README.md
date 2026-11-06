@@ -19,8 +19,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requiremen
 
 ## Configuration (Vercel environment variables, all sensitive)
 - `RG_USER`, `RG_PASS` — RotoGrinders login. Use a password unique to RotoGrinders.
-- `NTFY_TOPIC` — an unguessable random string; on ntfy.sh the topic name is the only secret.
-  Subscribe to it in the ntfy phone app. Optional `NTFY_SERVER` for a self-hosted instance.
+- `RESEND_API_KEY`, `RESEND_TO` — email alerts through Resend. `RESEND_FROM` is optional and
+  defaults to Resend's `onboarding@resend.dev`, which can only send to the account owner's
+  address; set a verified domain sender to mail anywhere else.
+- `NTFY_TOPIC` — alternative phone-push transport, used only when `RESEND_API_KEY` is unset.
+  Optional `NTFY_SERVER` for a self-hosted instance.
+- With neither configured, alerts are simply off: jobs still do their work and still record it,
+  and a missing transport is never reported as a failure.
 - `RG_COOKIE` — optional manual override if login breaks; takes precedence over the stored session.
 - `CRON_SECRET` — must equal the GitHub Actions repository secret of the same name.
 

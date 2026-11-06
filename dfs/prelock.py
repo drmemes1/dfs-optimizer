@@ -9,8 +9,6 @@ Correctness comes from the lock time in the database, never from the cron's hour
 saving cannot drift it."""
 from datetime import datetime, timezone
 
-from .names import name_norm
-
 ALERT_LEAD_MINUTES = 20
 
 
@@ -35,17 +33,6 @@ def should_alert(lock_time_utc, now, already_sent: bool, lead_minutes: int = ALE
     if m is None:
         return False
     return 0 < m <= lead_minutes
-
-
-def overlap_ratio(rg_names, dk_names) -> float:
-    """Share of the DraftKings pool that RotoGrinders also returned, matched on normalized names.
-    The RotoGrinders projections page is slate-scoped, so a low ratio means we were handed a
-    different slate's players and must not build from them."""
-    dk = {name_norm(n) for n in dk_names if n}
-    if not dk:
-        return 0.0
-    rg = {name_norm(n) for n in rg_names if n}
-    return len(dk & rg) / len(dk)
 
 
 def format_alert(slate_date, flags: list[dict], lineups_checked: int) -> tuple[str, str]:

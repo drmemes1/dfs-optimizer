@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 from ..http import get_json
 
 ET = ZoneInfo("America/New_York")
-MAIN_WINDOW_ET = (19, 20)   # the main draw tips 7:00-8:00pm ET; 7:30 and 8:00 starts are normal
+MAIN_WINDOW_ET = (19 * 60, 20 * 60)   # 7:00pm-8:00pm ET inclusive, in minutes past midnight;
+                                      # 7:00, 7:30 and 8:00 starts are all normal main draws
 
 LOBBY_URL = "https://www.draftkings.com/lobby/getcontests?sport=NBA"
 DRAFTABLES_URL = "https://api.draftkings.com/draftgroups/v1/draftgroups/{dg}/draftables?format=json"
@@ -76,7 +77,11 @@ def pick_main_slate(lobby: dict, date=None, override_group_id: int | None = None
     eligible = []
     for g in groups:
         local = _et(g.get("start"))
-        if local and local.date() == target and lo <= local.hour <= hi:
+        if local is None or local.date() != target:
+            continue
+        # minutes, not hours: `lo <= hour <= 20` would admit an 8:30pm three-game late slate as
+        # the main draw, which contradicts the docstring and the user-facing message
+        if lo <= local.hour * 60 + local.minute <= hi:
             eligible.append(g)
     if not eligible:
         return None

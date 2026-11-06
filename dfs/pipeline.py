@@ -76,6 +76,37 @@ def prepare(dk_text: str, rg_text: str, params: dict, lineup_src: dict | None = 
     return {"dk": dk, "merge": m, "players": players, "value_board": board, "lineups": lineup_report}
 
 
+MIN_DK_COVERAGE = 0.6
+
+
+class SlateMismatch(UploadError):
+    """The RotoGrinders read does not describe this DraftKings slate."""
+
+
+def dk_coverage(prep) -> float:
+    """Share of the DraftKings pool that the RotoGrinders read actually matched.
+
+    Measured from merge()'s own result, so it uses the production name matcher (aliases plus the
+    same-team last-name fallback) rather than a second, stricter comparison that would refuse
+    good nights over spelling."""
+    n = len(prep["dk"]["players"])
+    return (len(prep["players"]) / n) if n else 0.0
+
+
+def _require_slate_match(prep, verb: str) -> float:
+    """The RotoGrinders projections page is slate-scoped, so a read can return another slate's
+    players. merge() drops unmatched DraftKings players and save_pool() then zeroes the rest of
+    the pool as NOPROJ and persists it, so an unguarded read does not merely produce bad lineups
+    - it wrecks the stored slate. Refuse instead."""
+    cov = dk_coverage(prep)
+    if cov < MIN_DK_COVERAGE:
+        raise SlateMismatch(
+            f"the RotoGrinders projections match only {cov:.0%} of this DraftKings slate "
+            f"(need {MIN_DK_COVERAGE:.0%}); refusing to {verb} from what looks like a "
+            "different slate")
+    return cov
+
+
 def _settings(params, mode, overrides, locks, excludes) -> Settings:
     ov = overrides.get("GPP" if mode == "CONSENSUS" else mode, {})
     return Settings.from_params(params, mode, **ov, locks=list(locks), excludes=list(excludes))
@@ -297,6 +328,7 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
         db.seed_params(conn)
         version, params = db.current_params(conn)
         prep = prepare(dk_text, rg_text, params, lineup_src)
+        coverage = _require_slate_match(prep, "build")
         names = _name_lists(conn, prep["players"], lock_names, exclude_names, remember)
         locks, excludes = set(locks) | set(names["locks"]), set(excludes) | set(names["excludes"])
         lineups, costs, used = build_all(prep["players"], params, n_gpp, n_cash, overrides, locks, excludes)
@@ -311,7 +343,7 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
             run_id = save_lineups(cur, slate_id, lineups, costs, used, locks, excludes, version, key_to_pid, contest)
         conn.commit()
     return {"slate_id": slate_id, "run_id": run_id, "params_version": version, **_summary(prep),
-            "costs": costs, "names": names}
+            "costs": costs, "names": names, "dk_coverage": round(coverage, 3)}
 
 
 def run_rebuild(slate_id, n_gpp=10, n_cash=3, overrides=None, locks=(), excludes=(), contest=None,
@@ -358,6 +390,20 @@ def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=No
             if not dk_text or not rg_text:
                 raise UploadError("this slate has no stored uploads yet; build it first")
             prep = prepare(dk_text, rg_text, params, lineup_src)
+            degraded = None
+            if new_rg_raw is not None and dk_coverage(prep) < MIN_DK_COVERAGE:
+                # A fresh read that does not describe this slate. Fall back to the slate's stored
+                # projections so the lineup pages' starter and injury news still lands, and do
+                # not let the bad text become the slate's newest snapshot.
+                stored = _stored_upload(cur, "rg_projections_csv", slate_id)
+                if stored and stored != rg_text:
+                    bad = dk_coverage(prep)
+                    prep = prepare(dk_text, stored, params, lineup_src)
+                    new_rg_raw, rg_name = None, None
+                    degraded = (f"the fresh RotoGrinders read matched only {bad:.0%} of this slate, "
+                                "so the slate's stored projections were used instead; status and "
+                                "starter news is still current")
+            _require_slate_match(prep, "refresh")
             slate_id = save_slate(cur, prep["dk"])
             save_pool(cur, slate_id, prep["players"], "refresh", version)
             save_uploads(cur, slate_id, {"rg_projections_csv": (rg_name, new_rg_raw),
@@ -366,7 +412,7 @@ def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=No
                 save_pages(cur, slate_id, lineup_src)
         conn.commit()
         result = check(conn, slate_id, now=now)
-    return {"slate_id": slate_id, **_summary(prep), "check": result}
+    return {"slate_id": slate_id, **_summary(prep), "check": result, "degraded": degraded}
 
 
 def _now():

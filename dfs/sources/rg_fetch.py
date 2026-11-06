@@ -100,8 +100,11 @@ def _store_session(conn, cookie, now):
 
 def _record_failure(conn, now):
     with conn.cursor() as cur:
+        # rg_session.failures must be qualified: a bare `failures` on the right-hand side of
+        # ON CONFLICT DO UPDATE is ambiguous between the target row and EXCLUDED, and Postgres
+        # rejects the statement outright.
         cur.execute("""INSERT INTO rg_session(id, failures, last_failure_at) VALUES (1,1,%s)
-                       ON CONFLICT (id) DO UPDATE SET failures = failures + 1,
+                       ON CONFLICT (id) DO UPDATE SET failures = rg_session.failures + 1,
                          last_failure_at = EXCLUDED.last_failure_at""", (now,))
     conn.commit()
 
@@ -204,9 +207,23 @@ def _session_html(conn, opener_factory=None) -> str:
     try:
         return fetch_html(cookie)
     except RGNotConnected:
+        if os.environ.get("RG_COOKIE", "").strip():
+            # The manual override is what failed; session_cookie would hand back the same value,
+            # and clearing the stored session would discard a cookie that had nothing to do with it.
+            raise
         clear_session(conn)
         cookie = session_cookie(conn, login_fn=lf)
-        return fetch_html(cookie)
+        try:
+            return fetch_html(cookie)
+        except RGNotConnected:
+            # A cookie minted seconds ago was still rejected, so the session is unusable rather
+            # than merely expired - a lapsed subscription, a flagged account, an IP block.
+            # _store_session zeroes `failures`, so without counting this the cap could never trip
+            # and we would log in on every read, forever, in exactly the situation where account
+            # safety matters most.
+            clear_session(conn)
+            _record_failure(conn, datetime.now(timezone.utc))
+            raise
 
 
 def fetch_table_text(conn=None, opener_factory=None) -> tuple[str, bytes]:

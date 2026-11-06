@@ -92,3 +92,20 @@ def test_the_real_captured_lobby_yields_the_seven_game_seven_pm_slate():
     assert got is not None
     assert got["game_count"] == 7
     assert got["start"].astimezone(dk.ET).hour == 19
+
+
+def test_an_eight_thirty_start_is_not_the_main_draw():
+    """M1: `lo <= hour <= hi` admitted all of 8:00-8:59pm. A 3-game 8:30pm slate is a late slate,
+    and both the docstring and the user-facing push say 7-8pm."""
+    lobby = {"DraftGroups": [
+        {"DraftGroupId": 3, "GameTypeId": 70, "StartDateEst": "2026-11-06T20:30:00.0000000",
+         "GameCount": 3}], "Contests": [{"dg": 3, "po": 900_000}]}
+    assert dk.pick_main_slate(lobby, date=date(2026, 11, 6)) is None
+
+
+def test_an_eight_pm_start_is_still_the_main_draw():
+    """8:00pm locks are normal and must stay eligible."""
+    lobby = {"DraftGroups": [
+        {"DraftGroupId": 4, "GameTypeId": 70, "StartDateEst": "2026-11-06T20:00:00.0000000",
+         "GameCount": 9}], "Contests": [{"dg": 4, "po": 900_000}]}
+    assert dk.pick_main_slate(lobby, date=date(2026, 11, 6))["draft_group_id"] == 4

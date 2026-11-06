@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from . import db, history, pipeline
+from . import db, history, pipeline, redact
 from .sources import lineups as lineup_sources
 
 
@@ -46,10 +46,10 @@ def snapshot(now: datetime | None = None, fetch=None) -> dict:
                     refreshed.append({"slate_id": sid, "flags": len(out["check"]["flags"]),
                                       "swappable": sum(1 for f in out["check"]["flags"] if not f["locked"])})
                 except Exception as e:  # noqa: BLE001 - recorded on the run
-                    errors[f"refresh_{sid}"] = f"{type(e).__name__}: {e}"[:300]
+                    errors[f"refresh_{sid}"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]
             summary["refreshed"] = refreshed
         except Exception as e:  # noqa: BLE001
-            errors["snapshot"] = f"{type(e).__name__}: {e}"[:300]
+            errors["snapshot"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}
@@ -89,7 +89,7 @@ def grade(today=None, fetch_day=None) -> dict:
                 if pending:
                     errors[f"slate_{sid}"] = f"{len(pending)} game(s) not verified yet; will retry"
             except Exception as e:  # noqa: BLE001 - recorded on the run
-                errors[f"slate_{sid}"] = f"{type(e).__name__}: {e}"[:300]
+                errors[f"slate_{sid}"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}
@@ -147,28 +147,34 @@ def prelock(now: datetime | None = None, fetch=None, rg_fetch_fn=None, push=None
                                            save_raw_pages=False)
                 chk = out["check"]
                 title, body = pl.format_alert(str(s["date"]), chk["flags"], chk["checked_lineups"])
+                if out.get("degraded"):
+                    body = f"NOTE: {out['degraded']}\n{body}"
                 res = push(title=title, body=body, priority="high", tags="warning")
-                if not res.get("ok"):
-                    errors[f"push_{s['id']}"] = res.get("error") or "push failed"
+                delivered = bool(res.get("ok")) or bool(res.get("unconfigured"))
+                if not delivered:
+                    # a real send failure: record it, and do NOT consume the one-shot marker, so
+                    # the next tick inside the lead retries rather than going silent
+                    errors[f"push_{s['id']}"] = res.get("error") or "alert send failed"
                     new_errors[f"push_{s['id']}"] = errors[f"push_{s['id']}"]
                 summary["alerted"].append({"slate_id": s["id"], "flags": len(chk["flags"]),
-                                           "swappable": sum(1 for f in chk["flags"] if not f["locked"])})
+                                           "swappable": sum(1 for f in chk["flags"] if not f["locked"]),
+                                           "delivered": delivered,
+                                           "degraded": out.get("degraded")})
             except Exception as e:  # noqa: BLE001 - recorded on the run AND pushed
-                msg = f"{type(e).__name__}: {e}"[:300]
+                msg = redact.scrub(f"{type(e).__name__}: {e}")[:300]
                 errors[f"prelock_{s['id']}"] = msg
                 if not s["errored"]:
                     new_errors[f"prelock_{s['id']}"] = msg
-                    push(title="Pre-lock check FAILED", priority="high", tags="rotating_light",
-                         body=f"Slate {s['id']} ({s['date']}): {msg}\nCheck your lineups by hand.")
-                    _mark_alert(conn, s["id"], "prelock_error")
+                    res = push(title="Pre-lock check FAILED", priority="high", tags="rotating_light",
+                               body=f"Slate {s['id']} ({s['date']}): {msg}\nCheck your lineups by hand.")
+                    if res.get("ok") or res.get("unconfigured"):
+                        _mark_alert(conn, s["id"], "prelock_error")
                 continue
-            _mark_alert(conn, s["id"], "prelock")
+            if delivered:
+                _mark_alert(conn, s["id"], "prelock")
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors, "new_errors": new_errors}
-
-
-MIN_RG_DK_OVERLAP = 0.6
 
 
 def _stored_dk_text(conn, slate_date):
@@ -182,14 +188,17 @@ def _stored_dk_text(conn, slate_date):
     return bytes(r["raw"]).decode("utf-8-sig", errors="replace") if r else None
 
 
-def _dk_names(dk_text):
+def _dk_game_count(dk_text) -> int:
     from .sources.uploads import parse_dk_salaries
-    return [p["name"] for p in parse_dk_salaries(dk_text)["players"]]
+    return len(parse_dk_salaries(dk_text)["games"])
 
 
-def _rg_names(rg_text):
-    from .sources.rg_table import parse
-    return [r["name"] for r in parse(rg_text)["rows"]]
+def _record_send(errors, key, res):
+    """A send that failed is recorded; a transport deliberately left unconfigured is not. Without
+    the distinction, switching alerts off would fail every run; without the recording, an
+    undeliverable nudge would leave the run green with nobody told."""
+    if not res.get("ok") and not res.get("unconfigured"):
+        errors[key] = res.get("error") or "alert send failed"
 
 
 def build(now: datetime | None = None, lobby_fn=None, rg_fetch_fn=None, push=None,
@@ -201,7 +210,7 @@ def build(now: datetime | None = None, lobby_fn=None, rg_fetch_fn=None, push=Non
     clients and automating a real-money login was rejected), so the single manual step is
     *prompted* here rather than remembered: a missing upload pushes a nudge with hours of runway
     before lock."""
-    from . import notify, pipeline, prelock as pl
+    from . import notify, pipeline
     from .sources import dk
     now = now or datetime.now(timezone.utc)
     push = push or notify.push
@@ -216,46 +225,56 @@ def build(now: datetime | None = None, lobby_fn=None, rg_fetch_fn=None, push=Non
             main = dk.pick_main_slate(lobby, date=today, override_group_id=override_group_id)
             if not main:
                 summary["main_slate"] = None
-                push(title="No main slate tonight", priority="low", tags="zzz",
-                     body=f"{today}: no Classic group starts 7-8pm ET. Nothing to build.")
-                _finish(conn, rid, True, summary, errors)
-                return {"ok": True, "summary": summary, "errors": errors}
+                _record_send(errors, "push_no_slate", push(
+                    title="No main slate tonight", priority="low", tags="zzz",
+                    body=f"{today}: no Classic group starts 7-8pm ET. Nothing to build."))
+                ok = not errors
+                _finish(conn, rid, ok, summary, errors)
+                return {"ok": ok, "summary": summary, "errors": errors}
             summary["main_slate"] = {"draft_group_id": main["draft_group_id"],
                                      "games": main.get("game_count"),
                                      "start": str(main.get("start"))}
             dk_text = _stored_dk_text(conn, today)
             if not dk_text:
                 summary["blocked"] = "no dk_salaries_csv upload"
-                push(title="Upload DKSalaries.csv", priority="high", tags="warning",
-                     body=(f"{today}: main slate is {main.get('game_count')} games at "
-                           f"{main.get('start')}, but no DKSalaries.csv is stored yet. "
-                           "Upload it and the build will run."))
-                _finish(conn, rid, True, summary, errors)
-                return {"ok": True, "summary": summary, "errors": errors}
-            rg_text, _ = (rg_fetch_fn or _rg_table_text)()
-            overlap = pl.overlap_ratio(_rg_names(rg_text), _dk_names(dk_text))
-            summary["rg_dk_overlap"] = round(overlap, 3)
-            if overlap < MIN_RG_DK_OVERLAP:
-                msg = (f"RotoGrinders returned players matching only {overlap:.0%} of the "
-                       f"DraftKings pool (need {MIN_RG_DK_OVERLAP:.0%}); refusing to build from "
-                       "what looks like a different slate")
-                errors["slate_overlap"] = msg
-                push(title="Build refused - wrong slate", priority="high", tags="rotating_light",
-                     body=f"{today}: {msg}. Build by hand from the page.")
+                _record_send(errors, "push_nudge", push(
+                    title="Upload DKSalaries.csv", priority="high", tags="warning",
+                    body=(f"{today}: main slate is {main.get('game_count')} games at "
+                          f"{main.get('start')}, but no DKSalaries.csv is stored yet. "
+                          "Upload it and the build will run.")))
+                ok = not errors
+                _finish(conn, rid, ok, summary, errors)
+                return {"ok": ok, "summary": summary, "errors": errors}
+            # Is the stored upload the slate we just picked? The game count in the message comes
+            # from the lobby and the lineups come from the file, so an unnoticed mismatch would
+            # build the late slate and announce the main one. The RotoGrinders check cannot catch
+            # this: main-slate projections are a superset of a 2-game file and read ~100%.
+            file_games = _dk_game_count(dk_text)
+            lobby_games = main.get("game_count")
+            summary["dk_file_games"] = file_games
+            if lobby_games and file_games != lobby_games:
+                msg = (f"the stored DKSalaries.csv has {file_games} games but tonight's main slate "
+                       f"has {lobby_games}; it looks like a different slate's export")
+                errors["dk_file_mismatch"] = msg
+                _record_send(errors, "push_mismatch", push(
+                    title="Build refused - wrong file", priority="high", tags="rotating_light",
+                    body=f"{today}: {msg}. Upload the main slate's export and it will build."))
                 _finish(conn, rid, False, summary, errors)
                 return {"ok": False, "summary": summary, "errors": errors}
+            rg_text, _ = (rg_fetch_fn or _rg_table_text)()
             out = (build_fn or pipeline.run_build)(dk_text=dk_text, rg_text=rg_text) or {}
-            summary.update({k: out[k] for k in ("slate_id", "run_id") if k in out})
-            res = push(title="Lineups ready", priority="default", tags="basketball",
-                       body=(f"{today}: built for the {main.get('game_count')}-game slate. "
-                             f"{summary.get('rg_dk_overlap', 0):.0%} pool match. Review and enter."))
-            if not res.get("ok"):
-                errors["push"] = res.get("error") or "push failed"
+            summary.update({k: out[k] for k in ("slate_id", "run_id", "dk_coverage") if k in out})
+            _record_send(errors, "push", push(
+                title="Lineups ready", priority="default", tags="basketball",
+                body=(f"{today}: built for the {lobby_games}-game slate, "
+                      f"{summary.get('dk_coverage', 0):.0%} of the pool projected. "
+                      "Review and enter.")))
         except Exception as e:  # noqa: BLE001 - recorded on the run AND pushed
-            msg = f"{type(e).__name__}: {e}"[:300]
+            msg = redact.scrub(f"{type(e).__name__}: {e}")[:300]
             errors["build"] = msg
-            push(title="1pm build FAILED", priority="high", tags="rotating_light",
-                 body=f"{today}: {msg}\nBuild by hand before lock.")
+            _record_send(errors, "push_failure", push(
+                title="1pm build FAILED", priority="high", tags="rotating_light",
+                body=f"{today}: {msg}\nBuild by hand before lock."))
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}

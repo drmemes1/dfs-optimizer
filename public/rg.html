@@ -38,9 +38,10 @@
       <li>Vercel &rarr; <b>dfs-optimizer</b> &rarr; Settings &rarr; Environment Variables &rarr; add
         <code>RG_USER</code> (your RotoGrinders username) and <code>RG_PASS</code>, each ticked
         <b>Sensitive</b>, <b>Production</b> and <b>Preview</b> &rarr; Save &rarr; redeploy production.</li>
-      <li>Add <code>NTFY_TOPIC</code> the same way: a long random string you invent. Install the
-        <b>ntfy</b> app on your phone and subscribe to that exact string &mdash; it is how the
-        pre-lock alert reaches you, and the topic name is its only secret.</li>
+      <li>Add <code>RESEND_API_KEY</code> and <code>RESEND_TO</code> the same way &mdash; that is
+        how the pre-lock alert reaches you, by email about 15&ndash;20 minutes before lock.
+        Leave them unset and alerts are simply off: the sweep still runs and the slate page is
+        still current when you open it.</li>
     </ol>
     <p class="muted">The session is cached, so sign-ins happen roughly weekly rather than on every
       run. If the password is wrong, sign-in is attempted at most 3 times per 30 minutes rather

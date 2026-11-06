@@ -61,26 +61,6 @@ def test_accepts_a_naive_datetime_as_utc():
     assert prelock.should_alert(naive, at(18), already_sent=False) is True
 
 
-def test_overlap_ratio_matches_on_normalized_names():
-    dk = ["Devin Booker", "Jalen Green", "Dillon Brooks", "Alperen Sengun"]
-    rg = ["devin booker", "Jalen  Green", "D. Brooks"]
-    r = prelock.overlap_ratio(rg, dk)
-    assert 0.4 <= r <= 0.6  # Booker + Green match; "D. Brooks" and Sengun do not
-
-
-def test_overlap_ratio_is_one_for_identical_lists():
-    names = ["Devin Booker", "Jalen Green"]
-    assert prelock.overlap_ratio(names, names) == 1.0
-
-
-def test_overlap_ratio_is_zero_for_a_different_slate():
-    assert prelock.overlap_ratio(["Nikola Jokic"], ["Devin Booker", "Jalen Green"]) == 0.0
-
-
-def test_overlap_ratio_of_empty_dk_pool_is_zero():
-    assert prelock.overlap_ratio(["Devin Booker"], []) == 0.0
-
-
 def test_format_alert_title_is_ascii_and_body_names_the_players():
     flags = [
         {"name": "Nikola Jokic", "slot": "C", "status": "OUT", "locked": False, "mode": "GPP",
