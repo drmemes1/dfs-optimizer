@@ -81,3 +81,31 @@ def test_unmatched_and_fuzzy_names_are_loud():
     names = {u["name"] for u in rep["unmatched_names"]}
     assert "Ajay Mitchell" in names and "Isaiah Hartenstein" in names   # starters not in this pool -> reported
     assert ps[1]["starter_consensus"]
+
+
+# ---------------------------------------------------------------- back-to-back
+
+def test_b2b_is_set_from_the_teams_that_played_yesterday():
+    """b2b_mult is already tuned and already multiplied into every projection; the only missing
+    piece was the flag."""
+    src = {"rotowire": None, "rg": None, "b2b_teams": {"OKC", "MIL"}}
+    ps = [_p("A", "OKC", "CLE", 9000), _p("B", "CLE", "OKC", 8000), _p("C", "MIL", "TOR", 7000)]
+    apply_lineups(ps, src)
+    assert ps[0]["b2b"] is True and ps[2]["b2b"] is True
+    assert ps[1]["b2b"] is False
+
+
+def test_b2b_is_left_unknown_when_the_schedule_could_not_be_read():
+    """An unreachable scoreboard must not be recorded as 'nobody is on a back-to-back' - that is
+    a claim we cannot make, and signals.py treats a missing key as no adjustment anyway."""
+    ps = [_p("A", "OKC", "CLE", 9000)]
+    apply_lineups(ps, {"rotowire": None, "rg": None})
+    assert "b2b" not in ps[0]
+
+
+def test_b2b_matches_on_normalised_team_codes():
+    """ESPN and DraftKings disagree on some abbreviations; team_code is the shared normaliser."""
+    src = {"rotowire": None, "rg": None, "b2b_teams": {team_code("NO")}}
+    ps = [_p("A", "NOP", "SAS", 6000)]
+    apply_lineups(ps, src)
+    assert ps[0]["b2b"] is True

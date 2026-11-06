@@ -131,3 +131,34 @@ def test_parse_bref_day_real_markup():
     assert finals[frozenset({"LAC", "GSW"})] == {"LAC": 112, "GSW": 124}
     assert finals[frozenset({"BKN", "IND"})] == {"BKN": 98, "IND": 95}          # BRK -> BKN
     assert frozenset({"PHX", "CHA"}) not in finals                              # in progress, not final
+
+
+def test_teams_that_played_reads_the_scoreboard_for_that_date():
+    """Back-to-back comes from the same ESPN scoreboard the grader already uses."""
+    from dfs.sources import boxscores
+    import datetime
+    seen = {}
+    payload = {"events": [
+        {"id": "1", "competitions": [{"competitors": [
+            {"team": {"abbreviation": "OKC"}, "homeAway": "away", "score": "120"},
+            {"team": {"abbreviation": "CLE"}, "homeAway": "home", "score": "118"}],
+            "status": {"type": {"name": "STATUS_FINAL", "completed": True}, "period": 4}}]},
+        {"id": "2", "competitions": [{"competitors": [
+            {"team": {"abbreviation": "NO"}, "homeAway": "away", "score": "99"},
+            {"team": {"abbreviation": "SA"}, "homeAway": "home", "score": "101"}],
+            "status": {"type": {"name": "STATUS_FINAL", "completed": True}, "period": 4}}]}]}
+
+    def fake_get_json(url, timeout=20):
+        seen["url"] = url
+        return payload
+
+    out = boxscores.teams_that_played(datetime.date(2026, 11, 5), get_json=fake_get_json)
+    assert "20261105" in seen["url"], "the date must reach the scoreboard URL"
+    assert out == {"OKC", "CLE", "NOP", "SAS"}, "abbreviations come back normalised"
+
+
+def test_teams_that_played_is_empty_on_a_dark_night():
+    from dfs.sources import boxscores
+    import datetime
+    assert boxscores.teams_that_played(datetime.date(2026, 7, 4),
+                                       get_json=lambda url, timeout=20: {"events": []}) == set()

@@ -682,6 +682,11 @@ $("buildForm").onsubmit = async (e) => {
       n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx(), ...nameFields() });
     const w = j.warnings, notes = nameNotes(j.names);
     if (j.dk_coverage != null) notes.unshift(`<span class="dim">RotoGrinders covered <b style="color:var(--chalk)">${Math.round(j.dk_coverage * 100)}%</b> of the DraftKings pool.</span>`);
+    const b2b = j.lineups?.b2b;
+    if (b2b) notes.push(b2b.length
+      ? `<span class="dim">Back-to-back: ${esc(b2b.join(", "))} played last night.</span>`
+      : `<span class="dim">Nobody on this slate played last night.</span>`);
+    else if (w.lineup_source_errors?.b2b) notes.push(`<span class="warn">Could not read last night's schedule, so no back-to-back adjustment was applied.</span>`);
     if (w.unmatched_dk.length) notes.push(`<span class="bad">No projection for ${w.unmatched_dk.length} DK players:</span> ${esc(w.unmatched_dk.slice(0, 12).join(", "))}`);
     if (w.salary_mismatch.length) notes.push(`<span class="warn">RotoGrinders salary differs from DK for ${w.salary_mismatch.length} (DK used):</span> ${esc(w.salary_mismatch.slice(0, 8).map(m => m.name + " " + m.rg + "→" + m.dk).join(", "))}`);
     if (w.fuzzy_matches?.length) notes.push(`<span class="warn">Matched by last name and initial (check these):</span> ${esc(w.fuzzy_matches.slice(0, 10).map(f => f.name + " → " + f.matched).join(", "))}`);

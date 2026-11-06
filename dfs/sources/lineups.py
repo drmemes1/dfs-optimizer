@@ -144,8 +144,13 @@ def parse_rg_lineups(html: str) -> list[dict]:
     return games
 
 
-def fetch_all() -> dict:
-    """Fetch both pages; a failure in one source is recorded, never raised."""
+def fetch_all(now=None) -> dict:
+    """Fetch both lineup pages and yesterday's schedule; a failure in one source is recorded,
+    never raised.
+
+    Yesterday is taken relative to the current Eastern date, which is correct for the builds that
+    matter: a slate is built and refreshed on its own day. Rebuilds read the stored pool rather
+    than re-running this, so they cannot pick up the wrong night."""
     out = {"rotowire": None, "rg": None, "errors": {}, "raw": {}}
     for key, url, parser in (("rotowire", ROTOWIRE_URL, parse_rotowire), ("rg", RG_LINEUPS_URL, parse_rg_lineups)):
         try:
@@ -156,6 +161,14 @@ def fetch_all() -> dict:
                 out["errors"][key] = "page loaded but no games were found (layout may have changed)"
         except Exception as e:  # noqa: BLE001 - recorded and surfaced in the UI
             out["errors"][key] = f"{type(e).__name__}: {e}"[:200]
+    try:
+        from datetime import datetime, timedelta, timezone
+        from . import boxscores
+        from ..history import et_date
+        yesterday = et_date(now or datetime.now(timezone.utc)) - timedelta(days=1)
+        out["b2b_teams"] = boxscores.teams_that_played(yesterday)
+    except Exception as e:  # noqa: BLE001 - b2b stays unknown rather than wrongly false
+        out["errors"]["b2b"] = f"{type(e).__name__}: {e}"[:200]
     return out
 
 
@@ -182,8 +195,9 @@ def _worse(a: str, b: str) -> str:
 
 def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> dict:
     """Sets starter_rw, starter_rg, starter_consensus, contingent, inj_status (most severe of the
-    upload and RotoWire tags), vegas_total and fav_ml on each player. Returns a report."""
+    upload and RotoWire tags), vegas_total, fav_ml and b2b on each player. Returns a report."""
     rw_games, rg_games = src.get("rotowire") or [], src.get("rg") or []
+    b2b_teams = src.get("b2b_teams")
     rw_team = {abbr: t for g in rw_games for abbr, t in g["teams"].items()}
     rg_team = {abbr: t for g in rg_games for abbr, t in g["teams"].items()}
 
@@ -261,7 +275,12 @@ def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> d
         if v:
             p["vegas_total"] = v["total"]
             p["fav_ml"] = v["fav_ml"]["ml"] if v["fav_ml"] else None
+        if b2b_teams is not None:
+            # left unset when the schedule could not be read: "we do not know" is not the same
+            # claim as "this team did not play yesterday"
+            p["b2b"] = p["team_code"] in b2b_teams
     report["unmatched_teams"] = sorted(set(t for t in report["unmatched_teams"] if t))
     report["consensus_starters"] = sum(1 for p in players if p.get("starter_consensus"))
     report["contingent"] = [p["name"] for p in players if p.get("contingent")]
+    report["b2b"] = sorted({p["team_code"] for p in players if p.get("b2b")}) if b2b_teams is not None else None
     return report

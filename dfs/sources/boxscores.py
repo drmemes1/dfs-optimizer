@@ -16,7 +16,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ..http import get, get_json
+from ..http import get, get_json as get_json_default
 from ..scoring import dk_points
 from .lineups import team_code
 
@@ -57,6 +57,17 @@ def parse_scoreboard(data: dict) -> list[dict]:
                                or bool((status.get("type") or {}).get("completed")),
                       "period": _int(status.get("period"), 4)})
     return games
+
+
+def teams_that_played(game_date, get_json=None) -> set:
+    """Team codes that played on `game_date`, from the same ESPN scoreboard the grader uses.
+
+    A team appearing here was on the floor the night before the slate, which is what the
+    already-tuned b2b_mult signal keys off. Returns normalised codes so it can be compared with
+    DraftKings' abbreviations directly."""
+    ymd = game_date.strftime("%Y%m%d")
+    data = (get_json or get_json_default)(SCOREBOARD.format(ymd=ymd), timeout=20)
+    return {abbr for g in parse_scoreboard(data) for abbr in g["teams"] if abbr}
 
 
 def parse_summary(data: dict) -> dict:
@@ -156,12 +167,12 @@ def verify_game(game: dict, box: dict, bref_finals: dict) -> list[str]:
 def fetch_day(game_date) -> dict:
     """Fetch everything for one ET date. Network errors propagate to the caller (the job records them)."""
     ymd = game_date.strftime("%Y%m%d")
-    games = parse_scoreboard(get_json(SCOREBOARD.format(ymd=ymd)))
+    games = parse_scoreboard(get_json_default(SCOREBOARD.format(ymd=ymd)))
     bref = parse_bref_day(get(BREF_DAY.format(m=game_date.month, d=game_date.day, y=game_date.year)).decode("utf-8", "replace"))
     boxes = {}
     for g in games:
         if g["final"]:
-            boxes[g["event_id"]] = parse_summary(get_json(SUMMARY.format(event_id=g["event_id"])))
+            boxes[g["event_id"]] = parse_summary(get_json_default(SUMMARY.format(event_id=g["event_id"])))
     return {"games": games, "bref": bref, "boxes": boxes}
 
 
