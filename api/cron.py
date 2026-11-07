@@ -37,6 +37,9 @@ def _get(h):
     if job == "build":
         out = jobs.build()
         return send(h, 500 if out["errors"] else 200, out)
+    if job == "backfill":
+        out = jobs.backfill_logs()
+        return send(h, 500 if out["errors"] else 200, out)
     send(h, 400, {"ok": False, "error": "unknown job"})
 
 

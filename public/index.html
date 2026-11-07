@@ -601,11 +601,13 @@ function renderPool() {
   const rows = current.pool.filter(p => !q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q);
   $("lockCount").textContent = `${locks.size} locked, ${excludes.size} excluded`;
   $("poolTable").innerHTML = `<tr><th></th><th>Player</th><th>Pos</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
-      <th class="n">Proj</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
+      <th class="n">Proj</th><th class="n">Form</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
     rows.slice(0, 300).map(p => `<tr><td><button class="sm lock" aria-pressed="${locks.has(p.key)}" data-lock="${p.key}">Lock</button>
         <button class="sm excl" aria-pressed="${excludes.has(p.key)}" data-excl="${p.key}">Exclude</button></td>
       <td>${esc(p.name)}</td><td class="dim">${esc(p.pos)}</td><td class="dim">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
-      <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td><td class="n">${fmt(p.value, 2)}</td>
+      <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td>
+      <td class="n ${!p.m_form || +p.m_form === 1 ? "" : (+p.m_form < 1 ? "bad" : "good")}">${p.m_form && +p.m_form !== 1 ? ((+p.m_form - 1) * 100).toFixed(0) + "%" : "–"}</td>
+      <td class="n">${fmt(p.value, 2)}</td>
       <td class="n dim">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
   $("poolTable").querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {
     const k = +b.dataset.lock; locks.has(k) ? locks.delete(k) : (locks.add(k), excludes.delete(k)); renderPool(); });
@@ -682,6 +684,9 @@ $("buildForm").onsubmit = async (e) => {
       n_gpp: +$("nGpp").value, n_cash: +$("nCash").value, overrides: overrides(), contest: contestCtx(), ...nameFields() });
     const w = j.warnings, notes = nameNotes(j.names);
     if (j.dk_coverage != null) notes.unshift(`<span class="dim">RotoGrinders covered <b style="color:var(--chalk)">${Math.round(j.dk_coverage * 100)}%</b> of the DraftKings pool.</span>`);
+    if (j.form) notes.push(j.form.scaled
+      ? `<span class="dim">Recent form scaled <b style="color:var(--chalk)">${j.form.scaled}</b> projection(s); ${j.form.no_history} player(s) have no game log yet.</span>`
+      : `<span class="dim">Recent form changed nothing; ${j.form.no_history} player(s) have no game log yet.</span>`);
     const b2b = j.lineups?.b2b;
     if (b2b) notes.push(b2b.length
       ? `<span class="dim">Back-to-back: ${esc(b2b.join(", "))} played last night.</span>`

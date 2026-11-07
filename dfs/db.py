@@ -63,10 +63,28 @@ def seed_params(conn) -> int | None:
     return v
 
 
+def _fill_defaults(stored: dict) -> dict:
+    """Stored params over the current defaults, one level into each section.
+
+    A params row is a snapshot of the keys that existed when it was written. Adding a signal adds
+    a key the stored rows do not have, and reading it would raise KeyError on every build against
+    an older row - a failure that cannot show up in tests, because a fresh database seeds its
+    params from today's defaults. Filling the gaps here means a new key works everywhere from the
+    moment it is added, and the stored value always wins where there is one."""
+    from .params import default_params
+    out = default_params()
+    for section, value in (stored or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(section), dict):
+            out[section] = {**out[section], **value}
+        else:
+            out[section] = value
+    return out
+
+
 def current_params(conn) -> tuple[int, dict]:
     with conn.cursor() as cur:
         cur.execute("SELECT version, payload FROM params ORDER BY version DESC LIMIT 1")
         r = cur.fetchone()
     if not r:
         raise RuntimeError("no params row; run migrate + seed_params")
-    return r["version"], r["payload"]
+    return r["version"], _fill_defaults(r["payload"])

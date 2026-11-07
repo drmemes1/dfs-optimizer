@@ -45,8 +45,12 @@
 - [ ] #12 Hindsight-optimal lineup per slate (ceiling, salary used, structure vs projection error)
 - [ ] #7 Learner: nudges only from measured bias, <=1% per key per slate, minimum sample enforced in code,
       replay over all stored slates must not get worse, append params with old -> new and why
-- [ ] #8 Recent-form check: implied DK pts/min vs last-5/last-10 actual rate, flag >15% required increase
-      (needs a reachable game-log source; cdn.nba.com is blocked from Vercel)
+- [x] #8 Recent-form check: DK points per minute over the last 10 games, from verified ESPN box
+      scores stored in player_games. A projection more than 15% above that rate is pulled back,
+      capped at -15%; one well below nudges up, capped at +8% (tighter, because RotoGrinders
+      already chases hot play). Contingent players, short histories and players returning after
+      14+ days are excluded. ESPN was reachable all along - the cdn.nba.com note was the wrong
+      door, since box scores already come from site.api.espn.com.
 - [ ] News & buzz panel; backfill + Research page; accuracy-over-time chart
 - [x] #13 Automation: RotoGrinders is read with a stored login (RG_USER/RG_PASS in Vercel,
       sensitive; session cookie cached in rg_session so logins stay roughly weekly, failures
@@ -68,7 +72,10 @@
 
 ## Binding rules
 - #9 No value-play filters. Pool rule stays: salary >= 5500 OR consensus starter OR 24+ minutes.
-- Nudges from measured bias only; no hand-tuned changes without a graded result. Data-integrity guards
+- Signals affect lineups as soon as they are built (owner's decision, 2026-11-06), rather than
+  being shadow-logged until graded. The constants for an unmeasured signal are therefore capped
+  conservatively and are the learner's first target.
+- Learner nudges still come from measured bias only; no hand-tuned changes without a graded result. Data-integrity guards
   (starter consensus, name matching, box-score verification) are always on.
 
 ## Later / to be tested before it influences lineups

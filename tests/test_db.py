@@ -79,3 +79,24 @@ def test_player_games_holds_one_row_per_player_per_night(monkeypatch):
                 cur.execute("""INSERT INTO player_games(player_id, game_date, min, dk_pts)
                                VALUES (%s,'2026-10-01',31,41)""", (pid,))
         conn.rollback()
+
+
+def test_current_params_fills_in_keys_added_after_the_row_was_written(monkeypatch):
+    """A params row written before a new signal existed must not crash the build. Stored values
+    still win; only missing keys fall back to the defaults."""
+    import json
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db
+    from dfs.params import default_params
+    stale = default_params()
+    del stale["signals"]["form_lookback_games"]
+    stale["signals"]["pace_exponent"] = 0.42
+    with db.connect() as conn:
+        db.migrate(conn)
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO params(payload, reason, author, kind)
+                           VALUES (%s,'stale row','test','initial')""", (json.dumps(stale),))
+        conn.commit()
+        _, payload = db.current_params(conn)
+    assert payload["signals"]["form_lookback_games"] == default_params()["signals"]["form_lookback_games"]
+    assert payload["signals"]["pace_exponent"] == 0.42, "the stored value still wins"

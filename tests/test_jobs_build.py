@@ -157,3 +157,23 @@ def test_alerts_switched_off_leaves_the_nudge_run_green(monkeypatch):
                      push=lambda **kw: {"ok": False, "unconfigured": True, "error": "no transport"})
     assert out["ok"] is True
     assert out["errors"] == {}
+
+
+def test_backfill_job_records_its_days(monkeypatch):
+    from dfs import jobs
+    monkeypatch.setattr("dfs.gamelogs.backfill",
+                        lambda conn, through_date, days, **kw: {"days": {"2026-11-05": {"written": 3}},
+                                                                "errors": {}})
+    out = jobs.backfill_logs(days=1)
+    assert out["ok"] is True
+    assert out["summary"]["days"] == {"2026-11-05": 3}
+
+
+def test_backfill_job_reports_a_bad_night(monkeypatch):
+    from dfs import jobs
+    monkeypatch.setattr("dfs.gamelogs.backfill",
+                        lambda conn, through_date, days, **kw: {"days": {},
+                                                                "errors": {"2026-11-04": "espn down"}})
+    out = jobs.backfill_logs(days=1)
+    assert out["ok"] is False
+    assert "2026-11-04" in out["errors"]

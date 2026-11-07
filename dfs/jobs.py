@@ -81,6 +81,12 @@ def grade(today=None, fetch_day=None) -> dict:
                     d = cur.fetchone()["date"]
                 if d not in days:
                     days[d] = fetch_day(d)
+                    from . import gamelogs
+                    try:
+                        summary.setdefault("logged", {})[str(d)] = \
+                            gamelogs.ingest_day(conn, d, days[d])["written"]
+                    except Exception as e:  # noqa: BLE001 - logging must never fail grading
+                        errors[f"gamelog_{d}"] = redact.scrub(f"{type(e).__name__}: {e}")[:200]
                 rep = grading.grade_slate(conn, sid, days[d])
                 pending = {g: v for g, v in rep["games"].items() if v != "verified"}
                 summary["slates"].append({"slate_id": sid, "date": str(d), "complete": rep["complete"],
@@ -275,6 +281,25 @@ def build(now: datetime | None = None, lobby_fn=None, rg_fetch_fn=None, push=Non
             _record_send(errors, "push_failure", push(
                 title="1pm build FAILED", priority="high", tags="rotating_light",
                 body=f"{today}: {msg}\nBuild by hand before lock."))
+        ok = not errors
+        _finish(conn, rid, ok, summary, errors)
+    return {"ok": ok, "summary": summary, "errors": errors}
+
+
+def backfill_logs(days: int = 14, now: datetime | None = None) -> dict:
+    """One-off seeding of player_games. Safe to re-run: ingest upserts."""
+    from . import gamelogs
+    now = now or datetime.now(timezone.utc)
+    with db.connect() as conn:
+        db.migrate(conn)
+        rid = _start(conn, "backfill")
+        errors, summary = {}, {}
+        try:
+            out = gamelogs.backfill(conn, history.et_date(now), days=days)
+            summary["days"] = {d: v.get("written", 0) for d, v in out["days"].items()}
+            errors.update(out["errors"])
+        except Exception as e:  # noqa: BLE001 - recorded on the run
+            errors["backfill"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}

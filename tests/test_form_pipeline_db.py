@@ -60,3 +60,19 @@ def test_a_logged_player_with_a_wild_projection_is_scaled_and_stored(monkeypatch
                        WHERE p.slate_id=%s AND pl.name_norm=%s""",
                     (out["slate_id"], name_norm(victim)))
         assert float(cur.fetchone()["m_form"]) < 1.0
+
+
+def test_the_form_multiplier_reaches_the_api_payload(monkeypatch):
+    """The pool query lists its columns explicitly, so a new signal column is invisible to the
+    page until it is added there."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, queries
+    with db.connect() as conn:
+        db.migrate(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM slates ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+        assert row, "an earlier test in this module built a slate"
+        detail = queries.slate_detail(conn, row["id"])
+    assert detail["pool"], "the slate has a pool"
+    assert "m_form" in detail["pool"][0], "the page cannot show what the query does not select"
