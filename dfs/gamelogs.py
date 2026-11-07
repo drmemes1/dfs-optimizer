@@ -87,3 +87,42 @@ def backfill(conn, through_date, days: int, fetch_day=None) -> dict:
         except Exception as e:  # noqa: BLE001 - one bad night must not stop the walk
             out["errors"][str(d)] = f"{type(e).__name__}: {e}"[:200]
     return out
+
+
+def recent_rates(conn, name_norms, before_date, lookback: int) -> dict:
+    """DK points per minute over each player's last `lookback` games with minutes, strictly before
+    `before_date`.
+
+    Keyed on name_norm because prepare() runs before players have database ids. A name_norm shared
+    by two players yields no rate at all: merging their games would corrupt both."""
+    names = sorted({n for n in name_norms if n})
+    if not names:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute("""SELECT name_norm, count(*) AS n_ids FROM players
+                       WHERE name_norm = ANY(%s) GROUP BY name_norm""", (names,))
+        ambiguous = {r["name_norm"] for r in cur.fetchall() if r["n_ids"] > 1}
+        usable = [n for n in names if n not in ambiguous]
+        if not usable:
+            return {}
+        cur.execute("""SELECT name_norm, game_date, min, dk_pts FROM (
+                         SELECT p.name_norm, g.game_date, g.min, g.dk_pts,
+                                row_number() OVER (PARTITION BY p.name_norm
+                                                   ORDER BY g.game_date DESC) AS rn
+                         FROM player_games g JOIN players p ON p.id = g.player_id
+                         WHERE p.name_norm = ANY(%s) AND g.game_date < %s AND g.min > 0
+                       ) t WHERE rn <= %s""", (usable, before_date, lookback))
+        rows = cur.fetchall()
+    agg = {}
+    for r in rows:
+        a = agg.setdefault(r["name_norm"], {"minutes": 0.0, "points": 0.0, "games": 0,
+                                            "last_game_date": None})
+        a["minutes"] += float(r["min"])
+        a["points"] += float(r["dk_pts"])
+        a["games"] += 1
+        if a["last_game_date"] is None or r["game_date"] > a["last_game_date"]:
+            a["last_game_date"] = r["game_date"]
+    return {k: {"rate": (v["points"] / v["minutes"]) if v["minutes"] else 0.0,
+                "minutes": v["minutes"], "games": v["games"],
+                "last_game_date": v["last_game_date"]}
+            for k, v in agg.items()}

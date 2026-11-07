@@ -126,3 +126,82 @@ def test_backfill_records_a_failing_day_without_stopping(monkeypatch):
         out = gamelogs.backfill(conn, datetime.date(2026, 11, 1), days=3, fetch_day=flaky)
     assert out["errors"], "the bad day is recorded"
     assert len(out["days"]) == 2, "the other days still ran"
+
+
+def _log(conn, name, entries):
+    from dfs.names import name_norm
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO players(name, name_norm) VALUES (%s,%s) RETURNING id",
+                    (name, name_norm(name)))
+        pid = cur.fetchone()["id"]
+        for d, mins, dk in entries:
+            cur.execute("""INSERT INTO player_games(player_id, game_date, min, dk_pts)
+                           VALUES (%s,%s,%s,%s)""", (pid, d, mins, dk))
+    conn.commit()
+    return name_norm(name)
+
+
+def test_recent_rate_is_dk_points_per_minute(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        nn = _log(conn, "Rate One", [(datetime.date(2026, 10, 1), 30, 45),
+                                     (datetime.date(2026, 10, 3), 20, 15)])
+        out = gamelogs.recent_rates(conn, [nn], datetime.date(2026, 10, 10), lookback=10)
+    assert out[nn]["games"] == 2 and out[nn]["minutes"] == 50
+    assert abs(out[nn]["rate"] - (60 / 50)) < 1e-9
+
+
+def test_games_on_or_after_the_slate_date_are_excluded(monkeypatch):
+    """A player's own evening must not leak into the projection meant to predict it."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        nn = _log(conn, "Rate Two", [(datetime.date(2026, 10, 4), 30, 30),
+                                     (datetime.date(2026, 10, 5), 30, 90)])
+        out = gamelogs.recent_rates(conn, [nn], datetime.date(2026, 10, 5), lookback=10)
+    assert out[nn]["games"] == 1 and abs(out[nn]["rate"] - 1.0) < 1e-9
+
+
+def test_lookback_takes_only_the_most_recent_games(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        nn = _log(conn, "Rate Three", [(datetime.date(2026, 10, d), 10, 10) for d in range(1, 9)])
+        out = gamelogs.recent_rates(conn, [nn], datetime.date(2026, 10, 20), lookback=3)
+    assert out[nn]["games"] == 3 and out[nn]["last_game_date"] == datetime.date(2026, 10, 8)
+
+
+def test_zero_minute_games_do_not_count(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        nn = _log(conn, "Rate Four", [(datetime.date(2026, 10, 1), 0, 0),
+                                      (datetime.date(2026, 10, 2), 25, 50)])
+        out = gamelogs.recent_rates(conn, [nn], datetime.date(2026, 10, 10), lookback=10)
+    assert out[nn]["games"] == 1 and abs(out[nn]["rate"] - 2.0) < 1e-9
+
+
+def test_unknown_players_are_simply_absent(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        out = gamelogs.recent_rates(conn, ["nobody at all"], datetime.date(2026, 10, 10), lookback=10)
+    assert out == {}
+
+
+def test_a_shared_normalised_name_is_not_merged(monkeypatch):
+    """Two players normalising to the same name must not have their games pooled into one rate."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        _log(conn, "Dup Name", [(datetime.date(2026, 10, 1), 10, 60)])
+        _log(conn, "Dup Name", [(datetime.date(2026, 10, 2), 10, 0)])
+        out = gamelogs.recent_rates(conn, ["dup name"], datetime.date(2026, 10, 10), lookback=10)
+    assert "dup name" not in out, "ambiguous names yield no rate rather than a merged one"
