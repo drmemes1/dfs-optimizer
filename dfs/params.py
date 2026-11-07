@@ -16,6 +16,18 @@ DEFAULT_PARAMS = {
         "b2b_mult": 0.9751,
         "questionable_default_mult": 0.88,
         "contingent_gpp_mult": 0.93,
+        # Recent form: how far a projection may sit above the player's own recent DK points per
+        # minute before it is pulled back. Judgement, not measurement - there are no graded slates
+        # behind these yet, so they are capped conservatively and are the learner's first target.
+        # The boost side is tighter than the cut side because RotoGrinders already chases hot
+        # play, so the upside is the side more likely to double-count.
+        "form_lookback_games": 10,
+        "form_tolerance": 0.15,
+        "form_max_cut": 0.85,
+        "form_max_boost": 1.08,
+        "form_min_games": 4,
+        "form_min_minutes": 60,
+        "form_max_staleness_days": 14,
     },
     "pool": {
         "eligible_min_salary": 5500,

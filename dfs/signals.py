@@ -8,6 +8,8 @@ proj_adj = proj_rg
   * b2b_mult              if team played yesterday
   * questionable multiplier (per-player override, else questionable_default_mult)
   * contingent_gpp_mult   if flagged contingent
+  * m_form                 pulls a projection back toward the player's recent DK points per
+                           minute when it requires more than form_tolerance above it
 Floor and ceiling get the same multiplier. value = proj_adj / (salary / 1000).
 """
 import numpy as np
@@ -29,7 +31,38 @@ def is_out(p) -> bool:
     return norm_status(p.get("inj_status")) in OUT
 
 
-SIGNAL_COLUMNS = ["m_pace", "m_blowout", "m_close", "m_b2b", "m_questionable", "m_contingent"]
+SIGNAL_COLUMNS = ["m_pace", "m_blowout", "m_close", "m_b2b", "m_questionable", "m_contingent",
+                  "m_form"]
+
+
+def form_multiplier(p: dict, sp: dict) -> float:
+    """Pull a projection toward the player's recent DK points per minute when it requires an
+    implausible jump. Returns 1.0 - no adjustment - whenever the signal has nothing to say.
+
+    This is a skepticism filter, not a hot-streak chase: RotoGrinders already weights recent play,
+    so the new information is how far out on a limb a projection sits, not that a player is hot."""
+    if p.get("contingent"):
+        return 1.0                      # role is changing; the recent rate describes another job
+    rate = float(p.get("recent_rate") or 0)
+    games = int(p.get("recent_games") or 0)
+    rec_min = float(p.get("recent_minutes") or 0)
+    minutes = float(p.get("minutes") or 0)
+    proj = float(p.get("proj_rg") or 0)
+    if rate <= 0 or minutes <= 0 or proj <= 0:
+        return 1.0
+    if games < sp["form_min_games"] or rec_min < sp["form_min_minutes"]:
+        return 1.0
+    last, slate = p.get("recent_last_date"), p.get("slate_date")
+    if last and slate and (slate - last).days > sp["form_max_staleness_days"]:
+        return 1.0                      # back from a long absence; the rate is a different player
+    implied = proj / minutes
+    jump = implied / rate - 1.0
+    tol = sp["form_tolerance"]
+    if jump > tol:
+        return max(sp["form_max_cut"], (1 + tol) * rate / implied)
+    if jump < -tol:
+        return min(sp["form_max_boost"], (1 - tol) * rate / implied)
+    return 1.0
 
 
 def signal_components(p: dict, sp: dict) -> dict:
@@ -54,6 +87,7 @@ def signal_components(p: dict, sp: dict) -> dict:
         c["m_questionable"] = float(q) if q is not None else sp["questionable_default_mult"]
     if p.get("contingent"):
         c["m_contingent"] = sp["contingent_gpp_mult"]
+    c["m_form"] = form_multiplier(p, sp)
     return c
 
 
@@ -75,6 +109,8 @@ def signal_multiplier(p: dict, sp: dict) -> tuple[float, list[str]]:
         fired.append("questionable")
     if p.get("contingent"):
         fired.append("contingent")
+    if c["m_form"] != 1.0:
+        fired.append("form_cut" if c["m_form"] < 1.0 else "form_boost")
     return mult, fired
 
 
