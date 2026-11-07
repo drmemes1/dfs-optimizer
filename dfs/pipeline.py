@@ -57,7 +57,16 @@ def clean_overrides(raw: dict | None) -> dict:
 
 
 # ---------------------------------------------------------------- core build
-def prepare(dk_text: str, rg_text: str, params: dict, lineup_src: dict | None = None) -> dict:
+def _rates_for(conn, dk, params) -> dict:
+    """Recent rates keyed by name_norm, for the slate's own date. Keyed by name because this runs
+    before players have database ids."""
+    from . import gamelogs
+    return gamelogs.recent_rates(conn, [p["name_norm"] for p in dk["players"]], dk["date"],
+                                 params["signals"]["form_lookback_games"])
+
+
+def prepare(dk_text: str, rg_text: str, params: dict, lineup_src: dict | None = None,
+            rates: dict | None = None) -> dict:
     dk = parse_dk_salaries(dk_text)
     rg = parse_rg_projections(rg_text)
     m = merge(dk, rg)
@@ -70,6 +79,14 @@ def prepare(dk_text: str, rg_text: str, params: dict, lineup_src: dict | None = 
     if lineup_src is not None:
         lineup_report = lineup_sources.apply_lineups(players, lineup_src)
         lineup_report["errors"] = lineup_src.get("errors", {})
+    # recent form needs the slate date and must be attached before the signal layer runs
+    for p in players:
+        r = (rates or {}).get(p.get("name_norm")) or {}
+        p["slate_date"] = dk["date"]
+        p["recent_rate"] = r.get("rate")
+        p["recent_games"] = r.get("games")
+        p["recent_minutes"] = r.get("minutes")
+        p["recent_last_date"] = r.get("last_game_date")
     apply_signals(players, params)
     estimate_missing_ownership(players)
     board = value_board(players, params)
@@ -286,8 +303,11 @@ def _lineup_warning(rep):
 
 def _summary(prep):
     m = prep["merge"]
+    players = prep["players"]
     return {"date": str(prep["dk"]["date"]), "games": [g["game"] for g in prep["dk"]["games"]],
-            "players": len(prep["players"]),
+            "players": len(players),
+            "form": {"scaled": sum(1 for p in players if (p.get("m_form") or 1.0) != 1.0),
+                     "no_history": sum(1 for p in players if not p.get("recent_games"))},
             "warnings": {"unmatched_dk": m["unmatched_dk"], "unmatched_rg": m["unmatched_rg"][:40],
                          "salary_mismatch": m["salary_mismatch"],
                          "own_estimated": sum(1 for p in prep["players"] if p.get("own_estimated")),
@@ -327,7 +347,8 @@ def run_build(dk_text, rg_text, n_gpp=10, n_cash=3, overrides=None, locks=(), ex
         db.migrate(conn)
         db.seed_params(conn)
         version, params = db.current_params(conn)
-        prep = prepare(dk_text, rg_text, params, lineup_src)
+        prep = prepare(dk_text, rg_text, params, lineup_src,
+                       _rates_for(conn, parse_dk_salaries(dk_text), params))
         coverage = _require_slate_match(prep, "build")
         names = _name_lists(conn, prep["players"], lock_names, exclude_names, remember)
         locks, excludes = set(locks) | set(names["locks"]), set(excludes) | set(names["excludes"])
@@ -389,7 +410,8 @@ def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=No
             rg_text = rg_text or _stored_upload(cur, "rg_projections_csv", slate_id)
             if not dk_text or not rg_text:
                 raise UploadError("this slate has no stored uploads yet; build it first")
-            prep = prepare(dk_text, rg_text, params, lineup_src)
+            rates = _rates_for(conn, parse_dk_salaries(dk_text), params)
+            prep = prepare(dk_text, rg_text, params, lineup_src, rates)
             degraded = None
             if new_rg_raw is not None and dk_coverage(prep) < MIN_DK_COVERAGE:
                 # A fresh read that does not describe this slate. Fall back to the slate's stored
@@ -398,7 +420,7 @@ def run_refresh(rg_text=None, rg_raw=None, rg_name=None, dk_text=None, dk_raw=No
                 stored = _stored_upload(cur, "rg_projections_csv", slate_id)
                 if stored and stored != rg_text:
                     bad = dk_coverage(prep)
-                    prep = prepare(dk_text, stored, params, lineup_src)
+                    prep = prepare(dk_text, stored, params, lineup_src, rates)
                     new_rg_raw, rg_name = None, None
                     degraded = (f"the fresh RotoGrinders read matched only {bad:.0%} of this slate, "
                                 "so the slate's stored projections were used instead; status and "
