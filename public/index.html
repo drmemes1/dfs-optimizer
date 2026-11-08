@@ -133,13 +133,17 @@
   .card .meta .rank { font: 700 15px/1 var(--narrow); letter-spacing: .06em; color: var(--chalk); text-transform: uppercase; }
   .card .meta .proj { margin-left: auto; font: 700 19px/1 var(--narrow); color: var(--chalk); }
   .card table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .card td { padding: 5px 6px; border-bottom: 1px solid var(--rule-soft); }
+  .card td { padding: 5px 4px; border-bottom: 1px solid var(--rule-soft); }
   .card tr:last-child td { border-bottom: 0; }
   .card td:first-child {
     width: 40px; padding-left: 12px; font: 600 11px var(--narrow); letter-spacing: .08em;
     text-transform: uppercase; color: var(--faint);
   }
   .card td:nth-child(2) { overflow-wrap: anywhere; }
+  /* the exposure column used to be empty, so giving it content squeezed the name column; naming
+     its width keeps the squeeze off the one column that needs the room */
+  .card td:nth-child(6) { width: 44px; }
+  .card td:nth-child(7) { width: 40px; padding-right: 10px; }
   .card td:last-child { padding-right: 12px; }
   .card tr.flag td { background: var(--bad-bg); }
   .card tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
@@ -154,6 +158,18 @@
   /* buttons that cannot wrap set the min-content width of their colspan cell, which squeezes
      the name column in every other row of the card */
   .card td.subs button { margin: 4px 6px 0 0; max-width: 100%; white-space: normal; text-align: left; }
+  .card tr.pick { cursor: pointer; }
+  .card tr.pick:hover td { background: var(--panel); }
+  .card tr.open td { background: var(--panel); }
+  .card td.exp { position: relative; }
+  .card td.exp i { position: absolute; left: 0; bottom: 2px; height: 2px; background: var(--cool);
+                   display: block; font-style: normal; }
+  .vstrip { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+  .vchip { display: flex; align-items: baseline; gap: 7px; border: 1px solid var(--rule);
+           border-radius: 2px; padding: 4px 9px; font-size: 12px; cursor: pointer; background: none;
+           color: var(--chalk); }
+  .vchip:hover { border-color: var(--faint); }
+  .vchip .s { color: var(--dim); font-variant-numeric: tabular-nums; }
   /* A colspan cell's minimum width is distributed across the columns it spans, so a wide swap
      row squeezes the name column in every other row. width:0 + min-width:100% lets the content
      fill the cell while contributing nothing to the table's width calculation. */
@@ -245,6 +261,7 @@
       </div>
     </div>
     <div class="games" id="games"></div>
+    <div class="vstrip" id="valueStrip"></div>
     <div id="jobStatus" class="small dim" style="margin:-4px 0 12px"></div>
     <div id="costMsg"></div>
     <div class="tabs" id="modeTabs"></div>
@@ -361,7 +378,7 @@ const MODES = [["GPP", "GPP"], ["CASH", "Cash"], ["CONSENSUS", "Consensus"], ["O
 const CONS = [["min_salary", "Min salary"], ["max_from_team", "Max from team"], ["max_per_game", "Max from game"],
               ["max_own_sum", "Max ownership sum"], ["min_uniques", "Min uniques"], ["ceil_weight", "Ceiling weight"],
               ["own_penalty", "Ownership penalty"]];
-let current = null, mode = "GPP", params = null, checkResult = null;
+let current = null, mode = "GPP", params = null, checkResult = null, picked = null;
 let locks = new Set(), excludes = new Set();
 
 async function api(path, opts) {
@@ -492,28 +509,100 @@ function flagsFor(lineupId) {
   return (checkResult?.flags || []).filter(f => f.lineup_id === lineupId);
 }
 
-function lineupCard(lu) {
+// mirrors _SLOT_ELIG in dfs/optimizer.py; a mismatch here would offer a swap the server refuses
+const SLOT_ELIG = { PG: ["PG"], SG: ["SG"], SF: ["SF"], PF: ["PF"], C: ["C"],
+                    G: ["PG", "SG"], F: ["SF", "PF"], UTIL: ["PG", "SG", "SF", "PF", "C"] };
+const OUTISH = ["O", "OUT", "NOPROJ", "D", "INJ", "NA", "SUSP"];
+
+function canFill(pos, slot) {
+  const mine = String(pos || "").toUpperCase().split("/").map(x => x.trim());
+  return (SLOT_ELIG[slot] || []).some(x => mine.includes(x));
+}
+
+function tipped(p) { return p.game_start && new Date(p.game_start) <= Date.now(); }
+
+/* Replacements for one seat: anyone eligible for that slot who fits the salary freed up, is not
+   already in the lineup, has not tipped and is not ruled out. The server re-checks all of this in
+   pipeline.swap - this list only decides what is worth offering. */
+function replacementsFor(lu, player) {
+  const used = new Set(lu.players.map(x => x.key));
+  const room = 50000 - (lu.salary - player.salary);
+  return (current.pool || [])
+    .filter(p => !used.has(p.key) && canFill(p.pos, player.slot) && p.salary <= room
+                 && !tipped(p) && !OUTISH.includes((p.inj_status || "").toUpperCase())
+                 && (p.proj_adj || 0) > 0)
+    .sort((a, b) => (b.proj_adj || 0) - (a.proj_adj || 0))
+    .slice(0, 6);
+}
+
+/* Share of this mode's lineups that use each player. Only meaningful with several lineups, so
+   the column stays hidden for a single one. */
+function exposureFor(mode) {
+  const lus = current.lineups[mode] || [];
+  const n = lus.length, counts = new Map();
+  for (const lu of lus) for (const x of lu.players) counts.set(x.key, (counts.get(x.key) || 0) + 1);
+  return { n, pct: (key) => (n > 1 ? (counts.get(key) || 0) / n : null) };
+}
+
+function lineupCard(lu, exp) {
   const flags = flagsFor(lu.id), fk = new Map(flags.map(f => [f.key, f]));
   const rows = lu.players.map(p => {
     const f = fk.get(p.key), locked = p.game_start && new Date(p.game_start) <= Date.now();
     const subs = f && !f.locked && f.suggestions.length ? `<tr><td colspan="7" class="subs"><div class="subwrap">Swap ${esc(p.name)} (${esc(f.status)}) for:
         ${f.suggestions.map(s => `<button class="sm" data-swap="${lu.id}:${p.key}:${s.key}">${esc(s.name)} ${money(s.salary)} &nbsp;${fmt(s.proj)} (${s.proj_delta >= 0 ? "+" : ""}${fmt(s.proj_delta)})</button>`).join("")}</div></td></tr>`
       : f && f.locked ? `<tr><td colspan="7" class="subs"><div class="subwrap">${esc(p.name)} is ${esc(f.status)} but his game has tipped, so DK has him locked.</div></td></tr>` : "";
-    return `<tr class="${f ? "flag" : ""} ${locked ? "locked" : ""}"><td>${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
+    return `<tr class="pick ${f ? "flag" : ""} ${locked ? "locked" : ""}" data-pick="${lu.id}:${p.key}"><td>${p.slot}</td><td>${esc(p.name)}${f ? ` <b class="bad">${esc(f.status)}</b>` : ""}</td>
       <td class="dim team">${esc(p.team)}</td><td class="n">${money(p.salary)}</td><td class="n">${fmt(p.proj)}</td>
-      <td class="n dim">${fmt(p.own, 1)}%</td>${p.exposure !== undefined ? `<td class="n dim">${Math.round(p.exposure * 100)}%</td>` : "<td></td>"}</tr>${subs}`;
+      <td class="n dim">${fmt(p.own, 1)}%</td>${expCell(p, exp)}</tr>${subs}${pickRow(lu, p)}`;
   }).join("");
   return `<div class="card ${lu.entered ? "entered" : ""}">
     <div class="meta"><span class="rank">${lu.mode === "CONSENSUS" ? "Consensus" : "#" + lu.rank}</span>
       ${lu.edited ? '<span class="warn">edited</span>' : ""}
       ${lu.actual_score != null ? `<span>actual <b style="color:var(--chalk)">${fmt(lu.actual_score)}</b></span>` : ""}
       <span class="proj">${fmt(lu.proj)}</span></div>
-    ${lu.mode === "CONSENSUS" ? '<div class="dim small" style="padding:8px 12px 0">Last column is the share of GPP lineups using the player.</div>' : ""}
+    ${lu.mode === "CONSENSUS" ? '<div class="dim small" style="padding:8px 12px 0">Last column is the share of GPP lineups using the player.</div>'
+      : (exp && exp.n > 1 ? `<div class="dim small" style="padding:8px 12px 0">Last column is your exposure across these ${exp.n} lineups. Click a row to swap.</div>` : '<div class="dim small" style="padding:8px 12px 0">Click a row to swap.</div>')}
     <table>${rows}</table>
     <div class="foot"><span><b>${money(lu.salary)}</b> of $50,000</span><span>ceil <b>${fmt(lu.ceil)}</b></span>
       <span>own <b>${fmt(lu.own_sum, 0)}%</b></span>
       <label><input type="checkbox" data-entered="${lu.id}" ${lu.entered ? "checked" : ""}> entered</label></div>
   </div>`;
+}
+
+function expCell(p, exp) {
+  const share = p.exposure !== undefined ? p.exposure : (exp ? exp.pct(p.key) : null);
+  if (share === null || share === undefined) return "<td></td>";
+  return `<td class="n dim exp">${Math.round(share * 100)}%<i style="width:${Math.round(share * 100)}%"></i></td>`;
+}
+
+/* The expanded shortlist under a seat the owner clicked. Rendered from state so a re-render
+   keeps it open, rather than being poked into the DOM. */
+function pickRow(lu, p) {
+  if (picked !== `${lu.id}:${p.key}`) return "";
+  const room = 50000 - (lu.salary - p.salary);
+  const opts = replacementsFor(lu, p);
+  const body = opts.length
+    ? opts.map(r => `<button class="sm" data-swap="${lu.id}:${p.key}:${r.key}">${esc(r.name)} ${money(r.salary)}
+         ${fmt(r.proj_adj)} (${r.proj_adj - (p.proj || 0) >= 0 ? "+" : ""}${fmt(r.proj_adj - (p.proj || 0))})</button>`).join("")
+    : "Nobody eligible fits the salary left.";
+  return `<tr><td colspan="7" class="subs"><div class="subwrap">Replace ${esc(p.name)} in ${esc(p.slot)} &mdash;
+    ${money(room)} to spend<br>${body}</div></td></tr>`;
+}
+
+/* The graded value board, surfaced where it is useful rather than collapsed at the bottom.
+   Clicking one filters the player pool to him. */
+function renderValueStrip() {
+  const top = (current.value_board || []).slice(0, 8);
+  $("valueStrip").innerHTML = top.length
+    ? top.map(p => `<button type="button" class="vchip" data-find="${esc(p.name)}">
+        <span class="grade g${p.value_grade}">${p.value_grade}</span>${esc(p.name)}
+        <span class="s">${money(p.salary)}</span><span class="s">${fmt(p.value, 2)}x</span></button>`).join("")
+    : "";
+  $("valueStrip").querySelectorAll("[data-find]").forEach(b => b.onclick = () => {
+    $("poolSec").hidden = false; $("poolSec").open = true;
+    $("poolSearch").value = b.dataset.find; renderPool();
+    $("poolSec").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 }
 
 function render() {
@@ -547,10 +636,16 @@ function render() {
       <b>${cost.proj >= 0 ? "+" : ""}${fmt(cost.proj)} proj</b> (objective ${cost.objective >= 0 ? "+" : ""}${fmt(cost.objective)}) against the
       unconstrained build (${fmt(cost.unconstrained_proj)}). Locked ${lk.locks.length}, excluded ${lk.excludes.length}.</div>` : "";
 
+  const exp = exposureFor(mode);
   const entered = (current.entered_other_runs || []).filter(l => l.mode === mode);
-  $("lineups").innerHTML = (current.lineups[mode] || []).map(lineupCard).join("") +
-    (entered.length ? `<div class="dim small" style="grid-column:1/-1">Entered from earlier builds</div>` + entered.map(lineupCard).join("") : "") ||
+  $("lineups").innerHTML = (current.lineups[mode] || []).map(l => lineupCard(l, exp)).join("") +
+    (entered.length ? `<div class="dim small" style="grid-column:1/-1">Entered from earlier builds</div>` + entered.map(l => lineupCard(l, exp)).join("") : "") ||
     '<p class="dim">No lineups for this mode.</p>';
+  $("lineups").querySelectorAll("[data-pick]").forEach(tr => tr.onclick = (e) => {
+    if (e.target.closest("button, label, input")) return;   // swap buttons and the entered box
+    picked = picked === tr.dataset.pick ? null : tr.dataset.pick;
+    render();
+  });
   $("lineups").querySelectorAll("[data-entered]").forEach(cb => cb.onchange = async () => {
     try { await post("/api/lineup", { id: +cb.dataset.entered, action: "entered", value: cb.checked }); await loadSlate(s.id); }
     catch (e) { alert(e.message); cb.checked = !cb.checked; }
@@ -559,10 +654,11 @@ function render() {
     const [id, out, inn] = b.dataset.swap.split(":").map(Number);
     b.disabled = true;
     try { await post("/api/lineup", { id, action: "swap", out_key: out, in_key: inn });
+          picked = null;
           const keep = checkResult; await loadSlate(s.id); checkResult = keep && (await api(`/api/slate?id=${s.id}&check=1`)); render(); }
     catch (e) { alert(e.message); b.disabled = false; }
   });
-  renderPool(); renderLower(); renderResults();
+  renderValueStrip(); renderPool(); renderLower(); renderResults();
 }
 
 function renderResults() {
