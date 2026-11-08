@@ -41,8 +41,17 @@ def form_multiplier(p: dict, sp: dict) -> float:
 
     This is a skepticism filter, not a hot-streak chase: RotoGrinders already weights recent play,
     so the new information is how far out on a limb a projection sits, not that a player is hot."""
-    if p.get("contingent"):
-        return 1.0                      # role is changing; the recent rate describes another job
+    # Role: the recent rate describes the job a player had, so it says nothing about a job that
+    # is changing. `contingent` only covers sub-$5,500 players whose teammate is *unresolved*, so
+    # it misses the ordinary case - a starter ruled out and his backup promoted - which is
+    # precisely when a jump is justified and a cut does the most damage.
+    if p.get("contingent") or p.get("role_change"):
+        return 1.0
+    # Both of those flags come from the lineup pages. When neither page loaded, every player looks
+    # role-stable, so the exclusion would silently disappear on the nights we already know we are
+    # blind. Say nothing instead.
+    if not p.get("role_known"):
+        return 1.0
     rate = float(p.get("recent_rate") or 0)
     games = int(p.get("recent_games") or 0)
     rec_min = float(p.get("recent_minutes") or 0)
@@ -50,7 +59,9 @@ def form_multiplier(p: dict, sp: dict) -> float:
     proj = float(p.get("proj_rg") or 0)
     if rate <= 0 or minutes <= 0 or proj <= 0:
         return 1.0
-    if games < sp["form_min_games"] or rec_min < sp["form_min_minutes"]:
+    if games < sp["form_min_games"]:
+        return 1.0
+    if rec_min / games < sp["form_min_minutes_per_game"]:
         return 1.0
     last, slate = p.get("recent_last_date"), p.get("slate_date")
     if last and slate and (slate - last).days > sp["form_max_staleness_days"]:

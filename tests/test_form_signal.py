@@ -9,10 +9,12 @@ SLATE = datetime.date(2026, 11, 6)
 
 
 def mk(proj=32.0, minutes=32.0, rate=1.0, games=10, mins_total=300.0, last_days=1, **kw):
+    """A player with full information: the lineup pages loaded and his role is stable. Those are
+    the conditions under which the signal is allowed to speak at all."""
     return {"proj_rg": proj, "minutes": minutes, "recent_rate": rate, "recent_games": games,
             "recent_minutes": mins_total,
             "recent_last_date": SLATE - datetime.timedelta(days=last_days),
-            "slate_date": SLATE, **kw}
+            "slate_date": SLATE, "role_known": True, "role_change": False, **kw}
 
 
 def test_a_projection_inside_tolerance_is_untouched():
@@ -43,9 +45,13 @@ def test_too_few_games_says_nothing():
     assert form_multiplier(mk(proj=60.0, games=SP["form_min_games"] - 1), SP) == 1.0
 
 
-def test_too_few_minutes_says_nothing():
-    """A freak 20-point, 8-minute night is not a rate."""
-    assert form_multiplier(mk(proj=5.0, mins_total=SP["form_min_minutes"] - 1, rate=3.0), SP) == 1.0
+def test_the_minutes_floor_is_a_boundary_not_a_cliff():
+    """Exactly at the floor the signal speaks; a minute under it says nothing."""
+    floor = SP["form_min_minutes_per_game"]
+    assert form_multiplier(mk(proj=40.0, minutes=32.0, rate=1.0, games=10,
+                              mins_total=floor * 10), SP) < 1.0
+    assert form_multiplier(mk(proj=40.0, minutes=32.0, rate=1.0, games=10,
+                              mins_total=(floor - 1) * 10), SP) == 1.0
 
 
 def test_a_contingent_player_is_never_adjusted():
@@ -72,3 +78,50 @@ def test_missing_history_says_nothing():
 def test_form_is_a_stored_signal_column():
     from dfs.signals import SIGNAL_COLUMNS
     assert "m_form" in SIGNAL_COLUMNS, "stored per build so grading can measure it"
+
+
+# ---------------------------------------------------------------- role change (review Critical 1)
+
+def test_a_promoted_backup_is_not_cut_when_a_positional_teammate_is_out():
+    """The case the exclusion exists for, with the reviewer's numbers: a $6,200 backup who has
+    been playing 14 minutes a night at 0.75 DK/min, whose starting centre is ruled OUT, and whom
+    RotoGrinders correctly re-projects at 34 points in 32 minutes.
+
+    `contingent` does not cover him - it requires salary < $5,500 AND an unresolved tag - so
+    without `role_change` the signal cuts a correct projection by 15% on the night the edge is
+    largest."""
+    p = mk(proj=34.0, minutes=32.0, rate=0.75, games=10, mins_total=300.0, role_change=True)
+    assert form_multiplier(p, SP) == 1.0
+    # and the reviewer's exact player, 14 minutes a night, is excluded by the minutes floor too
+    assert form_multiplier(mk(proj=34.0, minutes=32.0, rate=0.75, games=10,
+                              mins_total=140.0, role_change=False), SP) == 1.0
+
+
+def test_a_rotation_player_is_still_cut_when_no_teammate_is_out():
+    """Without a role change the signal must still do its job, or the fix is just a switch-off.
+    This player gets 30 minutes a night, so he clears the minutes floor the promoted backup in
+    the test above does not - the two exclusions are independent."""
+    p = mk(proj=34.0, minutes=32.0, rate=0.75, games=10, mins_total=300.0, role_change=False)
+    assert form_multiplier(p, SP) < 1.0
+
+
+def test_the_signal_stands_down_when_the_lineup_sources_did_not_load():
+    """Review Critical 2: contingent and role_change both come from the lineup pages. When both
+    are down every player looks role-stable, so the exclusion silently disappears on exactly the
+    nights the system already knows it is flying blind."""
+    p = mk(proj=60.0, rate=0.5, role_known=False)
+    assert form_multiplier(p, SP) == 1.0
+
+
+# ---------------------------------------------------------------- minutes floor (review Important 6)
+
+def test_a_garbage_time_rate_is_excluded_by_the_per_game_minutes_floor():
+    """Ten 8-minute blowout appearances total 80 minutes, which cleared the old 60-minute
+    lookback total. Per game it is 8 minutes, which is not a rotation role."""
+    p = mk(proj=10.0, minutes=14.0, rate=1.0, games=10, mins_total=80.0)
+    assert form_multiplier(p, SP) == 1.0
+
+
+def test_a_real_rotation_player_still_clears_the_minutes_floor():
+    p = mk(proj=40.0, minutes=32.0, rate=1.0, games=10, mins_total=300.0)
+    assert form_multiplier(p, SP) < 1.0

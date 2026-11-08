@@ -188,6 +188,14 @@ def _pos_groups(pos: str | None) -> set:
 
 SEVERITY = {"": 0, "P": 0, "Q": 1, "GTD": 1, "D": 2, "O": 3, "OUT": 3}
 
+# A resolved absence. Q and GTD are excluded on purpose: a questionable player usually plays, so
+# his team-mates' roles have not actually changed.
+ABSENT = {"D", "O", "OUT", "NOPROJ", "INJ", "NA", "SUSP"}
+
+
+def _is_absent(status) -> bool:
+    return (status or "").strip().upper() in ABSENT
+
 
 def _worse(a: str, b: str) -> str:
     return a if SEVERITY.get(a, 0) >= SEVERITY.get(b, 0) else b
@@ -195,7 +203,8 @@ def _worse(a: str, b: str) -> str:
 
 def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> dict:
     """Sets starter_rw, starter_rg, starter_consensus, contingent, inj_status (most severe of the
-    upload and RotoWire tags), vegas_total, fav_ml and b2b on each player. Returns a report."""
+    upload and RotoWire tags), vegas_total, fav_ml, b2b, role_change and role_known on each
+    player. Returns a report."""
     rw_games, rg_games = src.get("rotowire") or [], src.get("rg") or []
     b2b_teams = src.get("b2b_teams")
     rw_team = {abbr: t for g in rw_games for abbr, t in g["teams"].items()}
@@ -279,6 +288,20 @@ def apply_lineups(players: list[dict], src: dict, cheap_cutoff: int = 5500) -> d
             # left unset when the schedule could not be read: "we do not know" is not the same
             # claim as "this team did not play yesterday"
             p["b2b"] = p["team_code"] in b2b_teams
+    # Role change: a resolved absence at an overlapping position is the ordinary way a job grows.
+    # This runs after the loop above, because inj_status is only final once RotoWire's tags have
+    # been merged in. It is deliberately broader than `contingent`, which is a sub-$5,500 GPP
+    # discount keyed on *unresolved* status and therefore misses the common case entirely.
+    by_team = {}
+    for p in players:
+        by_team.setdefault(p["team_code"], []).append(p)
+    for p in players:
+        mine = _pos_groups(p.get("pos"))
+        p["role_known"] = have_rw or have_rg
+        p["role_change"] = any(
+            t is not p and _is_absent(t.get("inj_status")) and _pos_groups(t.get("pos")) & mine
+            for t in by_team.get(p["team_code"], []))
+    report["role_change"] = [p["name"] for p in players if p["role_change"]]
     report["unmatched_teams"] = sorted(set(t for t in report["unmatched_teams"] if t))
     report["consensus_starters"] = sum(1 for p in players if p.get("starter_consensus"))
     report["contingent"] = [p["name"] for p in players if p.get("contingent")]

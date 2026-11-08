@@ -1,7 +1,7 @@
 # Recent form: pull back projections that require an implausible jump
 
 - **Date:** 2026-11-06
-- **Status:** design
+- **Status:** implemented; exclusions corrected 2026-11-08 after code review
 - **Supersedes:** `PLAN.md` #8, which parked this as "needs a reachable game-log source;
   cdn.nba.com is blocked from Vercel". That note sent us to the wrong door: box scores already
   come from ESPN's public API (`site.api.espn.com`), which returns per-player minutes and counting
@@ -119,7 +119,7 @@ plausible, not to the recent rate itself.
 | `form_max_cut` | 0.85 | A projection can lose at most 15%. One signal should not halve a player. |
 | `form_max_boost` | 1.08 | Deliberately smaller than the cut: RotoGrinders already chases hot play, so the upside is the side more likely to double-count |
 | `form_min_games` | 4 | Below this the rate is noise |
-| `form_min_minutes` | 60 | Total minutes across the lookback; protects against a rate built from garbage time |
+| `form_min_minutes_per_game` | 15 | **Corrected 2026-11-08:** this was a 60-minute *lookback total*, which is six minutes a night - ten 8-minute blowout appearances cleared it, which is the exact garbage-time rate the gate exists to stop. A per-game floor does stop it and does not change behaviour for rotation players. |
 
 All six are new `signals` keys and therefore movable by the learner later. None are frozen.
 
@@ -129,10 +129,22 @@ All six are new `signals` keys and therefore movable by the learner later. None 
 
 - Fewer than `form_min_games` games, or fewer than `form_min_minutes` total minutes.
 - No projected minutes, or a recent rate of zero.
-- **The player is flagged `contingent`.** His role is explicitly changing because someone ahead of
-  him is out, so his recent rate describes a job he no longer has. This is the single most
-  important exclusion in the design: without it the signal would systematically punish exactly the
-  cheap plays the pool rule exists to surface.
+- **The player is flagged `contingent` or `role_change`.** His role is changing, so his recent
+  rate describes a job he no longer has. This is the single most important exclusion in the design.
+
+  **Corrected 2026-11-08 after review.** The first implementation used `contingent` alone, which
+  `lineups.py` sets only for players **under $5,500 whose teammate's status is unresolved**
+  (Q/GTD/D). The ordinary role change - a starter ruled *out* and his backup promoted - is
+  resolved, not unresolved, and is frequently above $5,500, so it set `contingent = False` and the
+  signal cut the promoted backup at full strength on precisely the night his raised projection was
+  most likely correct. A worked case: a $6,200 backup at 0.75 DK/min over 10 games, re-projected
+  at 34 points in 32 minutes, was cut to 0.85 - and to roughly 0.80 once a back-to-back and a
+  blowout line compounded. `role_change` is now computed separately in `apply_lineups`: true when
+  any team-mate sharing a position group is *absent* (D/O/OUT/NOPROJ) at any salary. Questionable
+  team-mates are excluded on purpose, because a questionable player usually plays.
+- **The lineup pages did not load (`role_known` is false).** Both role flags come from those
+  pages, so when neither loads every player looks role-stable and the exclusion would silently
+  disappear - on exactly the nights the system already warns that it is flying blind.
 - **The player's last game was more than 14 days before the slate.** A returning injury makes the
   recent rate describe a different player.
 

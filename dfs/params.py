@@ -26,7 +26,9 @@ DEFAULT_PARAMS = {
         "form_max_cut": 0.85,
         "form_max_boost": 1.08,
         "form_min_games": 4,
-        "form_min_minutes": 60,
+        # per game, not a lookback total: ten 8-minute blowout appearances total 80 minutes and
+        # cleared a 60-minute total, which is exactly the garbage-time rate the gate exists to stop
+        "form_min_minutes_per_game": 15.0,
         "form_max_staleness_days": 14,
     },
     "pool": {

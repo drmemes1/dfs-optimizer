@@ -109,3 +109,42 @@ def test_b2b_matches_on_normalised_team_codes():
     ps = [_p("A", "NOP", "SAS", 6000)]
     apply_lineups(ps, src)
     assert ps[0]["b2b"] is True
+
+
+# ---------------------------------------------------------------- role change
+
+def test_role_change_is_set_when_a_positional_teammate_is_out_at_any_salary():
+    """`contingent` only fires under $5,500 with an *unresolved* tag. The ordinary role change -
+    a starter ruled OUT and his backup promoted - needs its own flag at any salary."""
+    ps = [_p("Backup Big", "OKC", "CLE", 6200, pos="C"),
+          _p("Star Big", "OKC", "CLE", 10400, pos="C", inj_status="O"),
+          _p("Guard Guy", "OKC", "CLE", 7000, pos="PG")]
+    apply_lineups(ps, {"rotowire": None, "rg": None, "b2b_teams": set()})
+    assert ps[0]["role_change"] is True, "his position group lost a starter"
+    assert ps[2]["role_change"] is False, "a guard is unaffected by a centre being out"
+
+
+def test_role_change_ignores_the_other_team():
+    ps = [_p("Mine", "OKC", "CLE", 6000, pos="C"),
+          _p("Theirs", "CLE", "OKC", 9000, pos="C", inj_status="O")]
+    apply_lineups(ps, {"rotowire": None, "rg": None})
+    assert ps[0]["role_change"] is False
+
+
+def test_a_merely_questionable_teammate_is_not_a_role_change():
+    """Q usually plays. Only a resolved absence changes the job."""
+    ps = [_p("Backup", "OKC", "CLE", 6000, pos="C"),
+          _p("Starter", "OKC", "CLE", 9000, pos="C", inj_status="Q")]
+    apply_lineups(ps, {"rotowire": None, "rg": None})
+    assert ps[0]["role_change"] is False
+
+
+def test_role_known_reflects_whether_either_lineup_page_loaded():
+    ps = [_p("A", "OKC", "CLE", 9000, pos="C")]
+    apply_lineups(ps, {"rotowire": None, "rg": None})
+    assert ps[0]["role_known"] is False, "neither page loaded, so roles are unknown"
+
+    ps2 = [_p("B", "OKC", "CLE", 9000, pos="C")]
+    apply_lineups(ps2, {"rotowire": parse_rotowire((FX / "rotowire_sample.html").read_text()),
+                        "rg": None})
+    assert ps2[0]["role_known"] is True

@@ -11,6 +11,29 @@ pytestmark = pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason=
 NO_PAGES = lambda: {"rotowire": None, "rg": None, "errors": {}, "raw": {}}  # noqa: E731
 
 
+def _lineup_pages(dk_text):
+    """A minimal but real RotoWire payload for the synthetic slate.
+
+    The form signal now stands down when neither lineup page loaded, because role_change and
+    contingent both come from those pages and their absence would silently remove the exclusion.
+    A test that wants the signal to speak therefore has to give it a page."""
+    from dfs.sources.uploads import parse_dk_salaries
+    dk = parse_dk_salaries(dk_text)
+    by_team = {}
+    for p in dk["players"]:
+        by_team.setdefault(p["team"], []).append(p)
+    games = []
+    for g in dk["games"]:
+        away, home = g["game"].split("@")
+        games.append({"away": away, "home": home, "total": 230.0, "fav_ml": None, "spread": None,
+                      "teams": {t: {"status": "confirmed",
+                                    "starters": [{"name": x["name"], "pos": x["pos"], "inj": ""}
+                                                 for x in by_team.get(t, [])[:5]],
+                                    "may_not_play": []}
+                                for t in (away, home)}})
+    return lambda: {"rotowire": games, "rg": None, "errors": {}, "raw": {}}
+
+
 def test_a_build_with_no_game_logs_is_unchanged_and_says_so(monkeypatch):
     """Review Focus 3: on the first run the table is empty. Every player gets 1.0."""
     monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
@@ -38,7 +61,7 @@ def test_a_logged_player_with_a_wild_projection_is_scaled_and_stored(monkeypatch
     dk = dk.replace("11/02/2026", "02/05/2027")
     victim = parse_dk_salaries(dk)["players"][0]["name"]
 
-    first = pipeline.run_build(dk, rg, n_gpp=2, n_cash=1, fetch=NO_PAGES)
+    first = pipeline.run_build(dk, rg, n_gpp=2, n_cash=1, fetch=_lineup_pages(dk))
     assert first["form"]["scaled"] == 0, "no logs yet, so nothing is adjusted"
 
     with db.connect() as conn:
@@ -53,7 +76,7 @@ def test_a_logged_player_with_a_wild_projection_is_scaled_and_stored(monkeypatch
                             (pid, datetime.date(2027, 1, 20 + d)))
         conn.commit()
 
-    out = pipeline.run_build(dk, rg, n_gpp=2, n_cash=1, fetch=NO_PAGES)
+    out = pipeline.run_build(dk, rg, n_gpp=2, n_cash=1, fetch=_lineup_pages(dk))
     assert out["form"]["scaled"] >= 1, "the logged player's projection is now pulled back"
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("""SELECT m_form FROM pool p JOIN players pl ON pl.id = p.player_id
@@ -76,3 +99,14 @@ def test_the_form_multiplier_reaches_the_api_payload(monkeypatch):
         detail = queries.slate_detail(conn, row["id"])
     assert detail["pool"], "the slate has a pool"
     assert "m_form" in detail["pool"][0], "the page cannot show what the query does not select"
+
+
+def test_the_signal_stands_down_when_the_lineup_pages_are_down(monkeypatch):
+    """Review Critical 2, end to end: with no lineup pages, role_change cannot be computed, so no
+    projection may be cut even when the game logs say it should be."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import pipeline
+    dk, rg = synthetic_files(seed=32, n_games=4)
+    dk = dk.replace("11/02/2026", "02/05/2027")
+    out = pipeline.run_build(dk, rg, n_gpp=2, n_cash=1, fetch=NO_PAGES)
+    assert out["form"]["scaled"] == 0
