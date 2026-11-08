@@ -205,3 +205,67 @@ def test_a_shared_normalised_name_is_not_merged(monkeypatch):
         _log(conn, "Dup Name", [(datetime.date(2026, 10, 2), 10, 0)])
         out = gamelogs.recent_rates(conn, ["dup name"], datetime.date(2026, 10, 10), lookback=10)
     assert "dup name" not in out, "ambiguous names yield no rate rather than a merged one"
+
+
+# ---------------------------------------------------------------- name matching (review 3 and 4)
+
+def _box(name, team, opp_team="CLE"):
+    line = {"name": name, "starter": True, "dnp": False, "min": 30, "pts": 20,
+            "fg3m": 1, "reb": 5, "ast": 3, "stl": 1, "blk": 0, "tov": 2}
+    game = {"event_id": "900", "teams": {team: {"score": 110, "home": False},
+                                         opp_team: {"score": 108, "home": True}},
+            "final": True, "period": 4}
+    return {"games": [game], "boxes": {"900": {team: [line], opp_team: []}}, "bref": {}}
+
+
+def test_an_aliased_box_score_name_is_matched(monkeypatch):
+    """ESPN writes legal names, DraftKings writes nicknames. Bare name_norm misses all twelve
+    aliases in dfs/names.py, silently, so those players would never get a game log."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    from dfs.names import name_norm
+    with db.connect() as conn:
+        db.migrate(conn)
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO players(name, name_norm, last_team)
+                           VALUES ('Lu Dort',%s,'OKC') RETURNING id""", (name_norm("Lu Dort"),))
+            pid = cur.fetchone()["id"]
+        conn.commit()
+        monkeypatch.setattr("dfs.sources.boxscores.verify_game", lambda g, b, r: [])
+        out = gamelogs.ingest_day(conn, datetime.date(2026, 11, 1), _box("Luguentz Dort", "OKC"))
+        assert out["written"] == 1, out
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) AS n FROM player_games WHERE player_id=%s", (pid,))
+            assert cur.fetchone()["n"] == 1
+
+
+def test_a_team_mismatch_is_reported_not_written(monkeypatch):
+    """One players row matching a name is not proof it is the same human. A same-name call-up on
+    another team would otherwise have his line written to this player's log and corrupt the rate
+    for the whole lookback."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    from dfs.names import name_norm
+    with db.connect() as conn:
+        db.migrate(conn)
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO players(name, name_norm, last_team)
+                           VALUES ('Jordan Miller',%s,'LAC')""", (name_norm("Jordan Miller"),))
+        conn.commit()
+        monkeypatch.setattr("dfs.sources.boxscores.verify_game", lambda g, b, r: [])
+        out = gamelogs.ingest_day(conn, datetime.date(2026, 11, 2),
+                                  _box("Jordan Miller", "MIA", opp_team="ORL"))
+    assert out["written"] == 0
+    assert "Jordan Miller" in str(out["team_mismatch"])
+
+
+def test_an_unknown_name_is_reported(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    from dfs import db, gamelogs
+    with db.connect() as conn:
+        db.migrate(conn)
+        monkeypatch.setattr("dfs.sources.boxscores.verify_game", lambda g, b, r: [])
+        out = gamelogs.ingest_day(conn, datetime.date(2026, 11, 3),
+                                  _box("Totally Unknown Person", "PHX", opp_team="SAC"))
+    assert out["written"] == 0
+    assert "Totally Unknown Person" in out["unmatched"]

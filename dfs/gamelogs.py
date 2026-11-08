@@ -5,27 +5,29 @@ as long as it sits in the lookback, which is exactly the silent corruption PLAN.
 verification rule exists to prevent."""
 from datetime import timedelta
 
-from .names import name_norm
+from .names import NameIndex
 from .scoring import dk_points
 from .sources import boxscores
 
 
 def _player_index(conn):
     """Every known player, for matching box-score names. Players enter this table when they first
-    appear on a slate, so a name matching nobody is simply someone we have never drafted."""
+    appear on a slate, so a name matching nobody is simply someone we have never drafted.
+
+    Matched the way grading matches: NameIndex applies the alias table, so ESPN's legal names
+    reach DraftKings' nicknames (Luguentz Dort -> Lu Dort, and eleven more). Bare name_norm
+    misses every one of them, silently."""
     with conn.cursor() as cur:
         cur.execute("SELECT id, name, name_norm, last_team FROM players")
         rows = cur.fetchall()
-    by_norm = {}
-    for r in rows:
-        by_norm.setdefault(r["name_norm"], []).append(r)
-    return by_norm
+    return NameIndex([{**r, "team": r["last_team"]} for r in rows])
 
 
 def ingest_day(conn, game_date, day) -> dict:
     """Write one row per player line in every verified game on `game_date`."""
-    by_norm = _player_index(conn)
-    out = {"written": 0, "skipped_games": {}, "unmatched": [], "ambiguous": []}
+    index = _player_index(conn)
+    out = {"written": 0, "skipped_games": {}, "unmatched": [], "ambiguous": [],
+           "team_mismatch": []}
     rows = []
     for g in day.get("games", []):
         label = "@".join(sorted(g["teams"]))
@@ -38,20 +40,28 @@ def ingest_day(conn, game_date, day) -> dict:
         for team, lines in box.items():
             opp = next((t for t in teams if t != team), None)
             for line in lines:
-                cands = by_norm.get(name_norm(line.get("name") or ""), [])
-                if not cands:
-                    out["unmatched"].append(line.get("name"))
+                name = line.get("name") or ""
+                hit, how = index.find(name, team)
+                if hit is None:
+                    out["unmatched"].append(name)
                     continue
-                if len(cands) > 1:
-                    # two players share a normalised name; attributing games to the wrong one
-                    # would silently corrupt a rate, so neither gets the game unless the team
-                    # settles it
-                    same_team = [c for c in cands if c["last_team"] == team]
-                    if len(same_team) != 1:
-                        out["ambiguous"].append(line.get("name"))
-                        continue
-                    cands = same_team
-                rows.append((cands[0]["id"], game_date, team, opp,
+                if how != "exact":
+                    # grading accepts a same-team last-name fallback because it only ever looks
+                    # inside one slate's pool. Here we scan a whole league night against every
+                    # player we have ever drafted, so a fallback is far likelier to be a
+                    # different human. Report it and write nothing.
+                    out["ambiguous"].append(name)
+                    continue
+                if hit.get("last_team") and hit["last_team"] != team:
+                    # one matching row is not proof it is the same person: a same-name call-up
+                    # would have his line written to this player's log and corrupt the rate for
+                    # the whole lookback. A traded player loses his pre-trade games this way,
+                    # leaving him short of form_min_games and therefore unadjusted - the safe
+                    # failure rather than the wrong one.
+                    out["team_mismatch"].append({"name": name, "box": team,
+                                                 "known": hit["last_team"]})
+                    continue
+                rows.append((hit["id"], game_date, team, opp,
                              line.get("min") or 0,
                              dk_points(pts=line.get("pts") or 0, fg3m=line.get("fg3m") or 0,
                                        reb=line.get("reb") or 0, ast=line.get("ast") or 0,

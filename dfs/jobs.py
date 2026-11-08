@@ -83,10 +83,17 @@ def grade(today=None, fetch_day=None) -> dict:
                     days[d] = fetch_day(d)
                     from . import gamelogs
                     try:
-                        summary.setdefault("logged", {})[str(d)] = \
-                            gamelogs.ingest_day(conn, d, days[d])["written"]
+                        ing = gamelogs.ingest_day(conn, d, days[d])
+                        summary.setdefault("logged", {})[str(d)] = ing["written"]
+                        unplaced = {k: len(ing.get(k) or []) for k in
+                                    ("unmatched", "ambiguous", "team_mismatch")}
+                        if any(unplaced.values()):
+                            summary.setdefault("unplaced", {})[str(d)] = unplaced
                     except Exception as e:  # noqa: BLE001 - logging must never fail grading
-                        errors[f"gamelog_{d}"] = redact.scrub(f"{type(e).__name__}: {e}")[:200]
+                        # recorded as a warning, not an error: grading itself succeeded, and a
+                        # 500 here would fail the workflow and alert the phone over a game log
+                        summary.setdefault("gamelog_warnings", {})[str(d)] = \
+                            redact.scrub(f"{type(e).__name__}: {e}")[:200]
                 rep = grading.grade_slate(conn, sid, days[d])
                 pending = {g: v for g, v in rep["games"].items() if v != "verified"}
                 summary["slates"].append({"slate_id": sid, "date": str(d), "complete": rep["complete"],
@@ -297,6 +304,14 @@ def backfill_logs(days: int = 14, now: datetime | None = None) -> dict:
         try:
             out = gamelogs.backfill(conn, history.et_date(now), days=days)
             summary["days"] = {d: v.get("written", 0) for d, v in out["days"].items()}
+            # a silent matcher is a matcher nobody checks: a name we cannot place writes no game
+            # log at all, and that player then never gets a form adjustment for any reason we
+            # would ever see
+            for key in ("unmatched", "ambiguous", "team_mismatch"):
+                names = sorted({str(n) for v in out["days"].values() for n in v.get(key, [])})
+                if names:
+                    summary.setdefault("unplaced", {})[key] = {"count": len(names),
+                                                               "sample": names[:15]}
             errors.update(out["errors"])
         except Exception as e:  # noqa: BLE001 - recorded on the run
             errors["backfill"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]

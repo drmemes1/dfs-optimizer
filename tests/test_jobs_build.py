@@ -177,3 +177,17 @@ def test_backfill_job_reports_a_bad_night(monkeypatch):
     out = jobs.backfill_logs(days=1)
     assert out["ok"] is False
     assert "2026-11-04" in out["errors"]
+
+
+def test_backfill_job_surfaces_names_it_could_not_place(monkeypatch):
+    """A name the matcher cannot place writes no game log at all, so that player silently never
+    gets a form adjustment. The count has to be visible."""
+    from dfs import jobs
+    monkeypatch.setattr("dfs.gamelogs.backfill",
+                        lambda conn, through_date, days, **kw: {
+                            "days": {"2026-11-05": {"written": 3, "unmatched": ["Nobody Known"],
+                                                    "ambiguous": [], "team_mismatch": []}},
+                            "errors": {}})
+    out = jobs.backfill_logs(days=1)
+    assert out["summary"]["unplaced"]["unmatched"]["count"] == 1
+    assert "Nobody Known" in out["summary"]["unplaced"]["unmatched"]["sample"]
