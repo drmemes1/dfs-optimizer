@@ -42,9 +42,16 @@
       Priority: consensus starter was the strongest measured predictor (73% vs 20% on cheap plays).
 - [ ] #6 Grading job: box scores accepted only if each team's minutes == 240/265/290 AND summed points ==
       the final score from an independent source; grade the *entered* version of each lineup
-- [ ] #12 Hindsight-optimal lineup per slate (ceiling, salary used, structure vs projection error)
+- [x] #12 Hindsight-optimal lineup per slate: grading.summarize computes the best possible DK
+      lineup from the slate's pool, with its score, salary used and salary shape, and the Results
+      panel renders it alongside the best lineup actually generated.
 - [ ] #7 Learner: nudges only from measured bias, <=1% per key per slate, minimum sample enforced in code,
-      replay over all stored slates must not get worse, append params with old -> new and why
+      replay over all stored slates must not get worse, append params with old -> new and why.
+      The guarded writer (paramstore.apply_changes) is built and tested; nothing in dfs/ or api/
+      calls it yet, so measurement happens nightly and nothing is ever written back. A key added
+      after a params row was written is now appended to the stored lineage by db.current_params,
+      so the learner can reach new signal keys and params_version still identifies what a build
+      actually used.
 - [x] #8 Recent-form check: DK points per minute over the last 10 games, from verified ESPN box
       scores stored in player_games. A projection more than 15% above that rate is pulled back,
       capped at -15%; one well below nudges up, capped at +8% (tighter, because RotoGrinders

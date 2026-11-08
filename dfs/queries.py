@@ -46,7 +46,7 @@ def slate_detail(conn, slate_id=None):
         cur.execute("""SELECT pl.draftable_id AS key, p.name, pl.team, pl.opp, pl.game, pl.game_start, pl.pos,
                               pl.salary, pl.minutes, pl.proj_rg, pl.proj_adj, pl.floor, pl.ceil, pl.value,
                               pl.value_grade, pl.own_pct, pl.own_estimated, pl.inj_status, pl.starter_consensus,
-                              pl.contingent, pl.signals, pl.signal_mult, pl.m_form
+                              pl.contingent, pl.signals, pl.signal_mult, pl.m_form, pl.form_jump
                        FROM pool pl JOIN players p ON p.id = pl.player_id
                        WHERE pl.slate_id=%s ORDER BY pl.proj_adj DESC NULLS LAST""", (slate_id,))
         pool = cur.fetchall()

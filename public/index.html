@@ -697,12 +697,12 @@ function renderPool() {
   const rows = current.pool.filter(p => !q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q);
   $("lockCount").textContent = `${locks.size} locked, ${excludes.size} excluded`;
   $("poolTable").innerHTML = `<tr><th></th><th>Player</th><th>Pos</th><th>Team</th><th class="n">Salary</th><th class="n">Min</th>
-      <th class="n">Proj</th><th class="n">Form</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
+      <th class="n">Proj</th><th class="n">Jump</th><th class="n">Value</th><th class="n">Own</th><th>Status</th></tr>` +
     rows.slice(0, 300).map(p => `<tr><td><button class="sm lock" aria-pressed="${locks.has(p.key)}" data-lock="${p.key}">Lock</button>
         <button class="sm excl" aria-pressed="${excludes.has(p.key)}" data-excl="${p.key}">Exclude</button></td>
       <td>${esc(p.name)}</td><td class="dim">${esc(p.pos)}</td><td class="dim">${esc(p.team)}</td><td class="n">${money(p.salary)}</td>
       <td class="n">${fmt(p.minutes, 0)}</td><td class="n">${fmt(p.proj_adj)}</td>
-      <td class="n ${!p.m_form || +p.m_form === 1 ? "" : (+p.m_form < 1 ? "bad" : "good")}">${p.m_form && +p.m_form !== 1 ? ((+p.m_form - 1) * 100).toFixed(0) + "%" : "–"}</td>
+      <td class="n ${!p.m_form || +p.m_form === 1 ? "" : (+p.m_form < 1 ? "bad" : "good")}" title="${p.form_jump != null ? "projection needs " + ((+p.form_jump) * 100).toFixed(0) + "% vs his recent rate" : ""}">${p.form_jump != null && p.m_form && +p.m_form !== 1 ? (+p.form_jump > 0 ? "+" : "") + ((+p.form_jump) * 100).toFixed(0) + "%" : "–"}</td>
       <td class="n">${fmt(p.value, 2)}</td>
       <td class="n dim">${fmt(p.own_pct)}%</td><td class="${p.inj_status ? "warn" : ""}">${esc(p.inj_status || "")}${p.contingent ? " contingent" : ""}</td></tr>`).join("");
   $("poolTable").querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {

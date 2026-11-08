@@ -36,7 +36,17 @@ SIGNAL_COLUMNS = ["m_pace", "m_blowout", "m_close", "m_b2b", "m_questionable", "
 
 
 def form_multiplier(p: dict, sp: dict) -> float:
-    """Pull a projection toward the player's recent DK points per minute when it requires an
+    """The multiplier alone. See form_detail for the gap behind it."""
+    return form_detail(p, sp)[0]
+
+
+def form_detail(p: dict, sp: dict) -> tuple:
+    """(multiplier, required_jump). The multiplier saturates at the caps, so it cannot tell a
+    projection needing 18% more than the player's recent rate from one needing 300% more; the jump
+    is reported separately so the owner can see what the signal reacted to and disagree with it.
+    The jump is None whenever the signal had nothing to say.
+
+    Pulls a projection toward the player's recent DK points per minute when it requires an
     implausible jump. Returns 1.0 - no adjustment - whenever the signal has nothing to say.
 
     This is a skepticism filter, not a hot-streak chase: RotoGrinders already weights recent play,
@@ -46,34 +56,34 @@ def form_multiplier(p: dict, sp: dict) -> float:
     # it misses the ordinary case - a starter ruled out and his backup promoted - which is
     # precisely when a jump is justified and a cut does the most damage.
     if p.get("contingent") or p.get("role_change"):
-        return 1.0
+        return 1.0, None
     # Both of those flags come from the lineup pages. When neither page loaded, every player looks
     # role-stable, so the exclusion would silently disappear on the nights we already know we are
     # blind. Say nothing instead.
     if not p.get("role_known"):
-        return 1.0
+        return 1.0, None
     rate = float(p.get("recent_rate") or 0)
     games = int(p.get("recent_games") or 0)
     rec_min = float(p.get("recent_minutes") or 0)
     minutes = float(p.get("minutes") or 0)
     proj = float(p.get("proj_rg") or 0)
     if rate <= 0 or minutes <= 0 or proj <= 0:
-        return 1.0
+        return 1.0, None
     if games < sp["form_min_games"]:
-        return 1.0
+        return 1.0, None
     if rec_min / games < sp["form_min_minutes_per_game"]:
-        return 1.0
+        return 1.0, None
     last, slate = p.get("recent_last_date"), p.get("slate_date")
     if last and slate and (slate - last).days > sp["form_max_staleness_days"]:
-        return 1.0                      # back from a long absence; the rate is a different player
+        return 1.0, None                # back from a long absence; the rate is a different player
     implied = proj / minutes
     jump = implied / rate - 1.0
     tol = sp["form_tolerance"]
     if jump > tol:
-        return max(sp["form_max_cut"], (1 + tol) * rate / implied)
+        return max(sp["form_max_cut"], (1 + tol) * rate / implied), jump
     if jump < -tol:
-        return min(sp["form_max_boost"], (1 - tol) * rate / implied)
-    return 1.0
+        return min(sp["form_max_boost"], (1 - tol) * rate / implied), jump
+    return 1.0, jump
 
 
 def signal_components(p: dict, sp: dict) -> dict:
@@ -98,7 +108,7 @@ def signal_components(p: dict, sp: dict) -> dict:
         c["m_questionable"] = float(q) if q is not None else sp["questionable_default_mult"]
     if p.get("contingent"):
         c["m_contingent"] = sp["contingent_gpp_mult"]
-    c["m_form"] = form_multiplier(p, sp)
+    c["m_form"], p["form_jump"] = form_detail(p, sp)
     return c
 
 

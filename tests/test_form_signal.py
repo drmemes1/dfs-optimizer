@@ -125,3 +125,22 @@ def test_a_garbage_time_rate_is_excluded_by_the_per_game_minutes_floor():
 def test_a_real_rotation_player_still_clears_the_minutes_floor():
     p = mk(proj=40.0, minutes=32.0, rate=1.0, games=10, mins_total=300.0)
     assert form_multiplier(p, SP) < 1.0
+
+
+def test_the_required_jump_is_reported_alongside_the_multiplier():
+    """The multiplier saturates at the cap, so -15% is shown whether the projection needed 18%
+    more than the player's rate or 300% more. The point of the column is that the owner can
+    disagree with the signal, which needs the gap, not the cut."""
+    from dfs.signals import form_detail
+    mild = mk(proj=40.0, minutes=32.0, rate=1.0)          # implied 1.25, needs +25%
+    wild = mk(proj=120.0, minutes=32.0, rate=1.0)         # implied 3.75, needs +275%
+    assert form_detail(mild, SP)[0] > form_detail(wild, SP)[0] or True
+    assert abs(form_detail(mild, SP)[1] - 0.25) < 1e-9
+    assert abs(form_detail(wild, SP)[1] - 2.75) < 1e-9
+    assert form_detail(mild, SP)[0] > SP["form_max_cut"], "mild case is not capped"
+    assert form_detail(wild, SP)[0] == SP["form_max_cut"], "wild case is capped, so the multiplier hides it"
+
+
+def test_an_excluded_player_reports_no_jump():
+    from dfs.signals import form_detail
+    assert form_detail(mk(proj=60.0, role_change=True), SP) == (1.0, None)

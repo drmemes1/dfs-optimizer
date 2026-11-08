@@ -175,7 +175,7 @@ POOL_COLS = ["draftable_id", "team", "opp", "game", "game_start", "pos", "salary
              "floor_rg", "ceil_rg", "proj_adj", "floor", "ceil", "sim85", "own_pct", "own_estimated",
              "starter_rg", "starter_rw", "starter_consensus", "contingent", "inj_status",
              "questionable_mult", "vegas_total", "fav_ml", "b2b", "signal_mult", "signals", "value",
-             "value_grade", *SIGNAL_COLUMNS]
+             "value_grade", "form_jump", *SIGNAL_COLUMNS]
 
 
 def _upsert_player(cur, p) -> int:

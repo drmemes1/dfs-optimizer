@@ -191,3 +191,35 @@ def test_backfill_job_surfaces_names_it_could_not_place(monkeypatch):
     out = jobs.backfill_logs(days=1)
     assert out["summary"]["unplaced"]["unmatched"]["count"] == 1
     assert "Nobody Known" in out["summary"]["unplaced"]["unmatched"]["sample"]
+
+
+def test_grade_ingests_recent_nights_even_with_no_slate_to_grade(monkeypatch):
+    """Daily ingest used to piggyback on the per-slate grading loop, so a night the owner did not
+    build was never logged. A player's 'last 10 games' could then span five weeks, which is not
+    recent form by any reading."""
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    import datetime
+    from dfs import jobs
+    monkeypatch.setattr("dfs.grading.slates_to_grade", lambda conn, today: [])
+    seen, ingested = [], []
+    monkeypatch.setattr("dfs.sources.boxscores.fetch_day",
+                        lambda d: seen.append(d) or {"games": [], "boxes": {}, "bref": {}})
+    monkeypatch.setattr("dfs.gamelogs.ingest_day",
+                        lambda conn, d, day: ingested.append(d) or {"written": 2})
+    out = jobs.grade(today=datetime.date(2026, 11, 8))
+    assert out["ok"] is True
+    assert ingested == [datetime.date(2026, 11, 7), datetime.date(2026, 11, 6)], \
+        "the last two nights are logged regardless of what needs grading"
+    assert out["summary"]["logged"]
+
+
+def test_a_game_log_failure_does_not_fail_the_grade_job(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    import datetime
+    from dfs import jobs
+    monkeypatch.setattr("dfs.grading.slates_to_grade", lambda conn, today: [])
+    monkeypatch.setattr("dfs.sources.boxscores.fetch_day",
+                        lambda d: (_ for _ in ()).throw(RuntimeError("espn down")))
+    out = jobs.grade(today=datetime.date(2026, 11, 8))
+    assert out["ok"] is True, "grading succeeded; a game log is not worth paging the phone"
+    assert out["summary"]["gamelog_warnings"]

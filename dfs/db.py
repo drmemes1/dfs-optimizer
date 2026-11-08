@@ -81,10 +81,47 @@ def _fill_defaults(stored: dict) -> dict:
     return out
 
 
+def _missing_keys(stored: dict, filled: dict) -> list[str]:
+    out = []
+    for section, value in filled.items():
+        if isinstance(value, dict):
+            for k in value:
+                if k not in (stored.get(section) or {}):
+                    out.append(f"{section}.{k}")
+        elif section not in stored:
+            out.append(section)
+    return sorted(out)
+
+
 def current_params(conn) -> tuple[int, dict]:
+    """The params in force, with any key added since the latest row was written filled in.
+
+    When a fill actually happens the filled payload is appended as a new row, for two reasons.
+    paramstore.apply_changes reads the raw stored payload and refuses keys it does not find, so
+    without this the learner could never tune a newly added signal. And params_version is stamped
+    on every pool and lineup, so if the effective value came from DEFAULT_PARAMS rather than the
+    row, replaying a slate at that version would not reproduce what was built - and would drift
+    every time the defaults were edited."""
     with conn.cursor() as cur:
         cur.execute("SELECT version, payload FROM params ORDER BY version DESC LIMIT 1")
         r = cur.fetchone()
     if not r:
         raise RuntimeError("no params row; run migrate + seed_params")
-    return r["version"], _fill_defaults(r["payload"])
+    filled = _fill_defaults(r["payload"])
+    added = _missing_keys(r["payload"] or {}, filled)
+    if not added:
+        return r["version"], filled
+    with conn.cursor() as cur:
+        # re-read inside the write so two cold starts racing cannot both append
+        cur.execute("SELECT version, payload FROM params ORDER BY version DESC LIMIT 1 FOR UPDATE")
+        latest = cur.fetchone()
+        if not _missing_keys(latest["payload"] or {}, _fill_defaults(latest["payload"])):
+            conn.commit()
+            return latest["version"], _fill_defaults(latest["payload"])
+        cur.execute("""INSERT INTO params(payload, reason, author, kind)
+                       VALUES (%s,%s,'system','migration') RETURNING version""",
+                    (json.dumps(filled),
+                     "filled keys added since v%s: %s" % (latest["version"], ", ".join(added))))
+        version = cur.fetchone()["version"]
+    conn.commit()
+    return version, filled

@@ -62,6 +62,33 @@ def recent_runs(conn, limit=5):
         return cur.fetchall()
 
 
+GAMELOG_NIGHTS = 2   # yesterday, plus the night before, so a late finish is still picked up
+
+
+def _ingest_recent_nights(conn, today, summary, fetch_day=None) -> None:
+    """Keep player_games current for every night, not only nights that happened to need grading.
+
+    Tying the ingest to the grading loop meant a night the owner did not build a slate was never
+    logged, so a player's 'last 10 games' could span five weeks while every freshness guard still
+    passed. A game-log problem is recorded as a warning: grading itself succeeded, and a 500 here
+    would fail the workflow and alert the phone over a box score."""
+    from . import gamelogs
+    from .sources import boxscores
+    fetch = fetch_day or boxscores.fetch_day
+    for i in range(1, GAMELOG_NIGHTS + 1):
+        d = today - timedelta(days=i)
+        try:
+            ing = gamelogs.ingest_day(conn, d, fetch(d))
+            summary.setdefault("logged", {})[str(d)] = ing["written"]
+            unplaced = {k: len(ing.get(k) or []) for k in
+                        ("unmatched", "ambiguous", "team_mismatch")}
+            if any(unplaced.values()):
+                summary.setdefault("unplaced", {})[str(d)] = unplaced
+        except Exception as e:  # noqa: BLE001 - a game log must never fail grading
+            summary.setdefault("gamelog_warnings", {})[str(d)] = \
+                redact.scrub(f"{type(e).__name__}: {e}")[:200]
+
+
 def grade(today=None, fetch_day=None) -> dict:
     """Grade every recent slate that has no grade yet. Unverified games are retried on the next run."""
     from datetime import datetime as _dt
@@ -81,19 +108,6 @@ def grade(today=None, fetch_day=None) -> dict:
                     d = cur.fetchone()["date"]
                 if d not in days:
                     days[d] = fetch_day(d)
-                    from . import gamelogs
-                    try:
-                        ing = gamelogs.ingest_day(conn, d, days[d])
-                        summary.setdefault("logged", {})[str(d)] = ing["written"]
-                        unplaced = {k: len(ing.get(k) or []) for k in
-                                    ("unmatched", "ambiguous", "team_mismatch")}
-                        if any(unplaced.values()):
-                            summary.setdefault("unplaced", {})[str(d)] = unplaced
-                    except Exception as e:  # noqa: BLE001 - logging must never fail grading
-                        # recorded as a warning, not an error: grading itself succeeded, and a
-                        # 500 here would fail the workflow and alert the phone over a game log
-                        summary.setdefault("gamelog_warnings", {})[str(d)] = \
-                            redact.scrub(f"{type(e).__name__}: {e}")[:200]
                 rep = grading.grade_slate(conn, sid, days[d])
                 pending = {g: v for g, v in rep["games"].items() if v != "verified"}
                 summary["slates"].append({"slate_id": sid, "date": str(d), "complete": rep["complete"],
@@ -103,6 +117,8 @@ def grade(today=None, fetch_day=None) -> dict:
                     errors[f"slate_{sid}"] = f"{len(pending)} game(s) not verified yet; will retry"
             except Exception as e:  # noqa: BLE001 - recorded on the run
                 errors[f"slate_{sid}"] = redact.scrub(f"{type(e).__name__}: {e}")[:300]
+        # every night, not only nights that needed grading
+        _ingest_recent_nights(conn, today, summary, fetch_day)
         ok = not errors
         _finish(conn, rid, ok, summary, errors)
     return {"ok": ok, "summary": summary, "errors": errors}
